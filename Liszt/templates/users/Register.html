@@ -1,0 +1,60 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{% static 'css/Register.css' %}" />
+
+    <title>Register</title>
+  </head>
+  <body>
+    <form class="card" method="post">
+      {% csrf_token %}
+      <h4>Registrarse</h4>
+      {% if error %}
+        <p class="error">{{ error }}</p>
+      {% endif %}
+      <div class="contenedor">
+        <div class="campo">
+          <label>Nombre: </label>
+          <input type="text" name="Nombre" value="{{ Nombre|default:'' }}" required />
+        </div>
+        <div class="campo">
+          <label>Apellido:</label>
+          <input type="text" name="Apellido" value="{{ Apellido|default:'' }}" required />
+        </div>
+      </div>
+      <div class="campo">
+        <label>Correo</label>
+        <input type="email" name="correo" value="{{ correo|default:'' }}" required />
+      </div>
+      <div class="campo">
+        <label>Contraseña</label>
+        <input type="password" name="contrasenia" required />
+      </div>
+      <div class="campo">
+        <label>Repita la contraseña</label>
+        <input type="password" name="confirmar_contrasenia" required />
+      </div>
+      <div class="contenedor">
+        <div class="campo">
+          <label>Fecha de nacimiento: </label>
+          <input type="date" name="fechadenacimiento" value="{{ fechadenacimiento|default:'' }}" required />
+        </div>
+        <div class="campo">
+          <label>Genero:</label>
+          <select id="Genero" name="Genero">
+            <option value="M" {% if Genero == "M" %}selected{% endif %}>Masculino</option>
+            <option value="F" {% if Genero == "F" %}selected{% endif %}>Femenino</option>
+          </select>
+        </div>
+      </div>
+      <div class="campo">
+        <label>Pais: </label>
+        <input type="text" name="PaisDeOrigen" value="{{ PaisDeOrigen|default:'' }}" required />
+      </div>
+      <button type="submit">Registrarse</button>
+    </form>
+  </body>
+</html>

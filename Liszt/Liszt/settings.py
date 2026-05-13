@@ -80,7 +80,6 @@ DATABASES = {
         "ENGINE": "mssql",
         'NAME': config('DB_NAME'),
         'HOST': config('DB_HOST'),
-        "PORT": "",
         "OPTIONS": {
             "driver": "ODBC Driver 17 for SQL Server",
             "Trusted_Connection": "yes",

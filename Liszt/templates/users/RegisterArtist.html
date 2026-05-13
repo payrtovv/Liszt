@@ -1,0 +1,36 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{% static 'css/Register.css' %}" />
+
+    <title>RegisterArtist</title>
+  </head>
+  <body>
+    <form class="card" method="post">
+      {% csrf_token %}
+      <h4>Registrarse como artista</h4>
+      {% if error %}
+      <p class="error">{{ error }}</p>
+      {% endif %}
+      <div class="campo">
+        <label>Discografica</label>
+        <input type="text" name="Discografica" required />
+      </div>
+      <div class="campo">
+        <label>Biografia</label>
+        <textarea id="biografia" name="Biografia" required></textarea>
+      </div>
+      <div class="campo">
+        <label>Genero:</label>
+        <select id="Genero" name="Genero">
+          <option value="Rock">Rock</option>
+          <option value="Salsa">Salsa</option>
+        </select>
+      </div>
+      <button type="submit">Registrarse</button>
+    </form>
+  </body>
+</html>
