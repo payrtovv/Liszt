@@ -71,8 +71,11 @@
         </div>
       </div>
       <div class="campo">
-        <label>Pais: </label>
-        <input list="paises" placeholder="Escribe un país..." />
+        <input
+          name="PaisDeOrigen"
+          list="paises"
+          placeholder="Escribe un país..."
+        />
         <datalist id="paises">
           <option value="Argentina"></option>
           <option value="Bolivia"></option>
@@ -107,5 +110,6 @@
       </div>
       <button type="submit">Registrarse</button>
     </form>
+    <script src="{% static 'js/Register.js' %}"></script>
   </body>
 </html>
