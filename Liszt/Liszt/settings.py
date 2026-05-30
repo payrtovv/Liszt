@@ -78,8 +78,8 @@ WSGI_APPLICATION = "Liszt.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "mssql",
-        'NAME': config('DB_NAME'),
-        'HOST': config('DB_HOST'),
+        "NAME": config("DB_NAME"),
+        "HOST": config("DB_HOST"),
         "PORT": "",
         "OPTIONS": {
             "driver": "ODBC Driver 17 for SQL Server",
@@ -87,7 +87,6 @@ DATABASES = {
         },
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators

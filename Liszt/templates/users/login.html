@@ -1,3 +1,4 @@
+{% load static %}
 <!doctype html>
 <html>
   <head>
@@ -22,6 +23,12 @@
           <input type="password" name="contrasenia" required />
         </div>
         <button type="submit">Entrar</button>
+        <div id="Registrarse">
+          <a href="{% url 'Register' %}">Registrarse</a>
+        </div>
+        <div id="Registrarse">
+          <a href="{% url 'RegisterArtist' %}">Registrarse como artista</a>
+        </div>
       </form>
     </div>
   </body>
