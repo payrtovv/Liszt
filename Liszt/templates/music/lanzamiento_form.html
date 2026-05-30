@@ -1,0 +1,77 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ accion }} lanzamiento - Liszt</title>
+  <link rel="stylesheet" href="{% static 'css/music.css' %}">
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/home">♪ Liszt</a>
+    <a href="/music/artistas/">Artistas</a>
+    <a href="/music/canciones/">Canciones</a>
+    <a href="/music/generos/">Géneros</a>
+    <a href="/music/discograficas/">Discográficas</a>
+  </nav>
+
+  <div class="container">
+    <a class="back-link" href="/music/artistas/">← Volver a artistas</a>
+
+    <div class="card" style="max-width:580px">
+      <h1>{{ accion }} lanzamiento</h1>
+
+      {% if error %}
+        <div class="error-msg">{{ error }}</div>
+      {% endif %}
+
+      <form method="post">
+        {% csrf_token %}
+
+        <div class="form-group">
+          <label for="nombre">Título</label>
+          <input type="text" id="nombre" name="nombre" value="{{ lanzamiento.nombre }}" maxlength="60" required>
+        </div>
+
+        <div class="form-group">
+          <label for="tipo">Tipo</label>
+          <select id="tipo" name="tipo" required>
+            <option value="">-- Seleccionar --</option>
+            <option value="Album" {% if lanzamiento.tipo == "Album" %}selected{% endif %}>Álbum</option>
+            <option value="Ep" {% if lanzamiento.tipo == "Ep" %}selected{% endif %}>EP</option>
+            <option value="Single" {% if lanzamiento.tipo == "Single" %}selected{% endif %}>Single</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="genero">Género</label>
+          <select id="genero" name="genero" required>
+            <option value="">-- Seleccionar --</option>
+            {% for g in generos %}
+              <option value="{{ g.id }}" {% if g.id == lanzamiento.genero_id %}selected{% endif %}>
+                {{ g.nombre }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha">Fecha de publicación</label>
+          <input type="date" id="fecha" name="fecha" value="{{ lanzamiento.fecha }}" required>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">{{ accion }}</button>
+          <a class="btn btn-secondary" href="/music/artistas/">Cancelar</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="{% static 'JS/music.js' %}"></script>
+  <script>
+    // Contador de caracteres en el título
+    initCharCounter('nombre', 60);
+  </script>
+</body>
+</html>

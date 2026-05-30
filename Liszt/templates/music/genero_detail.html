@@ -1,0 +1,52 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ genero.nombre }} - Liszt</title>
+  <link rel="stylesheet" href="{% static 'css/music.css' %}">
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/home">♪ Liszt</a>
+    <a href="/music/artistas/">Artistas</a>
+    <a href="/music/canciones/">Canciones</a>
+    <a href="/music/generos/">Géneros</a>
+    <a href="/music/discograficas/">Discográficas</a>
+  </nav>
+
+  <div class="container">
+    <a class="back-link" href="/music/generos/">← Volver a géneros</a>
+
+    <h1>{{ genero.nombre }}</h1>
+    <p style="color:#555; margin-bottom:1.5rem">{{ canciones|length }} canción(es)</p>
+
+    {% if canciones %}
+      <table>
+        <thead>
+          <tr>
+            <th>Canción</th>
+            <th>Artista</th>
+            <th>Álbum</th>
+            <th>Duración</th>
+            <th>Reproducciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in canciones %}
+          <tr>
+            <td><strong style="color:#fff">{{ c.nombre }}</strong></td>
+            <td>{{ c.artista }}</td>
+            <td><a href="/music/lanzamientos/{{ c.idLanzamiento }}/" style="color:#3387c7">{{ c.album }}</a></td>
+            <td>{{ c.duracion }}</td>
+            <td>{{ c.reproducciones }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">No hay canciones en este género.</div>
+    {% endif %}
+  </div>
+</body>
+</html>

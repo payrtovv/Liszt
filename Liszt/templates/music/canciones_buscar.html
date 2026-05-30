@@ -1,0 +1,74 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Buscar canciones - Liszt</title>
+  <link rel="stylesheet" href="{% static 'css/music.css' %}">
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/home">♪ Liszt</a>
+    <a href="/music/artistas/">Artistas</a>
+    <a href="/music/canciones/">Canciones</a>
+    <a href="/music/generos/">Géneros</a>
+    <a href="/music/discograficas/">Discográficas</a>
+  </nav>
+
+  <div class="container">
+    <h1>Buscar canciones</h1>
+
+    <form method="get" id="form-busqueda" class="search-bar">
+      <input id="input-busqueda" type="text" name="q" value="{{ q }}" placeholder="Buscar...">
+      <select id="select-filtro" name="filtro">
+        <option value="nombre" {% if filtro == "nombre" %}selected{% endif %}>Por nombre</option>
+        <option value="genero" {% if filtro == "genero" %}selected{% endif %}>Por género</option>
+        <option value="artista" {% if filtro == "artista" %}selected{% endif %}>Por artista</option>
+        <option value="album" {% if filtro == "album" %}selected{% endif %}>Por álbum</option>
+      </select>
+      <button class="btn btn-primary" type="submit">Buscar</button>
+    </form>
+
+    {% if q %}
+      {% if canciones %}
+        <p style="color:#aaa; margin-bottom:1rem">
+          {{ canciones|length }} resultado(s) para "<strong style="color:#fff">{{ q }}</strong>"
+        </p>
+        <table id="tabla-canciones">
+          <thead>
+            <tr>
+              <th data-sort>Canción</th>
+              <th data-sort>Artista</th>
+              <th data-sort>Álbum</th>
+              <th data-sort>Duración</th>
+              <th data-sort>Reproducciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in canciones %}
+            <tr>
+              <td><strong style="color:#fff">{{ c.nombre }}</strong></td>
+              <td>{{ c.artista }}</td>
+              <td><a href="/music/lanzamientos/{{ c.idLanzamiento }}/" style="color:#3387c7">{{ c.album }}</a></td>
+              <td>{{ c.duracion }}</td>
+              <td>{{ c.reproducciones }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No se encontraron canciones para "{{ q }}".</div>
+      {% endif %}
+    {% else %}
+      <div class="empty">Ingresa un término de búsqueda para encontrar canciones.</div>
+    {% endif %}
+  </div>
+
+  <script src="{% static 'JS/music.js' %}"></script>
+  <script>
+    // Busca automáticamente 600ms después de que el usuario deja de escribir
+    initAutoSearch('input-busqueda', 'select-filtro', 'form-busqueda', 600);
+    initSortableTable('tabla-canciones');
+  </script>
+</body>
+</html>

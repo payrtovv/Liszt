@@ -1,0 +1,68 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ lanzamiento.nombre }} - Liszt</title>
+  <link rel="stylesheet" href="{% static 'css/music.css' %}">
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/home">♪ Liszt</a>
+    <a href="/music/artistas/">Artistas</a>
+    <a href="/music/canciones/">Canciones</a>
+    <a href="/music/generos/">Géneros</a>
+    <a href="/music/discograficas/">Discográficas</a>
+  </nav>
+
+  <div class="container">
+    <a class="back-link" href="/music/artistas/{{ lanzamiento.idArtista }}/">← Volver al artista</a>
+
+    <div class="card">
+      <div class="artist-header">
+        <div>
+          <h1>{{ lanzamiento.nombre }}</h1>
+          <div class="artist-info">
+            <p><strong>Artista:</strong> {{ lanzamiento.artista }}</p>
+            <p><strong>Tipo:</strong> <span class="badge badge-gray">{{ lanzamiento.tipo }}</span></p>
+            <p><strong>Género:</strong> {{ lanzamiento.genero }}</p>
+            <p><strong>Publicación:</strong> {{ lanzamiento.fecha }}</p>
+          </div>
+        </div>
+        {% if es_propio %}
+        <div>
+          <a class="btn btn-secondary" href="/music/lanzamientos/{{ lanzamiento.idLanzamiento }}/editar/">✏ Editar</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <h2>Canciones</h2>
+
+    {% if canciones %}
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Título</th>
+            <th>Duración</th>
+            <th>Reproducciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in canciones %}
+          <tr>
+            <td style="color:#555">{{ c.pista }}</td>
+            <td><strong style="color:#fff">{{ c.nombre }}</strong></td>
+            <td>{{ c.duracion }}</td>
+            <td>{{ c.reproducciones }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">Este lanzamiento no tiene canciones registradas.</div>
+    {% endif %}
+  </div>
+</body>
+</html>

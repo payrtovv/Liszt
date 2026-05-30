@@ -13,6 +13,20 @@ def index(request):
     return HttpResponse("prueba")
 
 def HomeView(request):
+    id_persona = request.session.get('idPersona')
+
+    if not id_persona:
+        return redirect('login')
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT nombre, apellido, correo, paisdeorigen
+            FROM [Usuarios].[Persona]
+            WHERE idPersona = %s
+        """, [id_persona])
+        row = cursor.fetchone()
+        print(row)  # lo ves en la terminal
+
     return render(request, "users/home.html")
 
 def LoginView(request):
@@ -22,7 +36,7 @@ def LoginView(request):
 
         with connection.cursor() as cursor:
             cursor.execute("""
-                SELECT contrasenia 
+                SELECT idPersona, contrasenia 
                 FROM [Usuarios].[Persona]
                 WHERE correo = %s       
             """, [mail])
@@ -32,7 +46,8 @@ def LoginView(request):
             if row is None:
                 return render(request, "users/login.html", {'error': 'Correo no encontrado'})
 
-            if row[0] == contrasenia:
+            if row[1] == contrasenia:
+                request.session['idPersona'] = row[0]
                 return redirect('home')
             else:
                 return render(request, "users/login.html", {'error': 'Contraseña incorrecta'})
@@ -58,6 +73,8 @@ def Register_view(request):
             'Genero': genero,
             'PaisDeOrigen': pais,
         }
+
+        print(contexto)
 
         if not all([nombre, apellido, correo, contrasenia, fechadenacimiento, genero, pais]):
             contexto['error'] = 'Todos los campos son obligatorios.'

@@ -1,0 +1,37 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Discográficas - Liszt</title>
+  <link rel="stylesheet" href="{% static 'css/music.css' %}">
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/home">♪ Liszt</a>
+    <a href="/music/artistas/">Artistas</a>
+    <a href="/music/canciones/">Canciones</a>
+    <a href="/music/generos/">Géneros</a>
+    <a href="/music/discograficas/">Discográficas</a>
+  </nav>
+
+  <div class="container">
+    <h1>Discográficas</h1>
+
+    {% for d in discograficas %}
+    <div class="disc-card">
+      <h2>{{ d.nombre }} <span class="stat">({{ d.num_artistas }} artista(s))</span></h2>
+      {% if d.artistas %}
+        <ul>
+          {% for a in d.artistas %}
+            <li><a href="/music/artistas/{{ a.idArtista }}/">{{ a.nombre }} {{ a.apellido }}</a></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p style="color:#555">Sin artistas registrados.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</body>
+</html>
