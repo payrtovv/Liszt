@@ -1,54 +1,42 @@
+{% extends 'music/base_music.html' %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Géneros - Liszt</title>
-  <link rel="stylesheet" href="{% static 'css/music.css' %}">
-</head>
-<body>
-  <nav class="navbar">
-    <a class="brand" href="/home">♪ Liszt</a>
-    <a href="/music/artistas/">Artistas</a>
-    <a href="/music/canciones/">Canciones</a>
-    <a href="/music/generos/">Géneros</a>
-    <a href="/music/discograficas/">Discográficas</a>
-  </nav>
 
-  <div class="container">
-    <h1>Géneros musicales</h1>
+{% block title %}Géneros - Liszt{% endblock %}
+{% block nav_generos %}active{% endblock %}
+{% block page_title %}Géneros musicales{% endblock %}
 
-    <div class="filter-bar">
-      <input id="filtro-generos" type="text" placeholder="Filtrar géneros...">
-      <span id="filter-count">{{ generos|length }} géneros</span>
-    </div>
+{% block content %}
+<div class="filter-bar">
+  <input id="filtro-generos" type="text" placeholder="Filtrar géneros...">
+  <span id="filter-count">{{ generos|length }} géneros</span>
+</div>
 
-    <table id="tabla-generos">
-      <thead>
-        <tr>
-          <th data-sort>Género</th>
-          <th data-sort>Lanzamientos</th>
-          <th data-sort>Canciones</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for g in generos %}
-        <tr>
-          <td><strong style="color:#fff">{{ g.nombre }}</strong></td>
-          <td>{{ g.num_lanzamientos }}</td>
-          <td>{{ g.num_canciones }}</td>
-          <td><a class="btn btn-primary" href="/music/generos/{{ g.idGenero }}/">Ver canciones</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<table id="tabla-generos">
+  <thead>
+    <tr>
+      <th data-sort>Género</th>
+      <th data-sort>Lanzamientos</th>
+      <th data-sort>Canciones</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for g in generos %}
+    <tr>
+      <td><strong style="color:#fff">{{ g.nombre }}</strong></td>
+      <td>{{ g.num_lanzamientos }}</td>
+      <td>{{ g.num_canciones }}</td>
+      <td><a class="btn btn-primary" href="{% url 'genero_detail' genero_id=g.idGenero %}">Ver canciones</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
 
-  <script src="{% static 'JS/music.js' %}"></script>
-  <script>
-    initLiveFilter('filtro-generos', 'tabla-generos');
-    initSortableTable('tabla-generos');
-  </script>
-</body>
-</html>
+{% block scripts %}
+<script src="{% static 'JS/music.js' %}"></script>
+<script>
+  initLiveFilter('filtro-generos', 'tabla-generos');
+  initSortableTable('tabla-generos');
+</script>
+{% endblock %}

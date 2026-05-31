@@ -14,20 +14,9 @@ def index(request):
 
 def HomeView(request):
     id_persona = request.session.get('idPersona')
-
     if not id_persona:
         return redirect('Login')
-
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT nombre, apellido, correo, paisdeorigen
-            FROM [Usuarios].[Persona]
-            WHERE idPersona = %s
-        """, [id_persona])
-        row = cursor.fetchone()
-        print(row)  # lo ves en la terminal
-
-    return render(request, "users/home.html")
+    return redirect('/music/home')
 
 def PerfilView(request):
     id_persona = request.session.get('idPersona')
