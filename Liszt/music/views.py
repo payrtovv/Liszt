@@ -595,3 +595,8 @@ def discograficas_list(request):
         })
 
     return render(request, 'music/discograficas_list.html', {'discograficas': discograficas})
+
+
+
+def Home(request):
+    return render(request, 'music/music_player.html')

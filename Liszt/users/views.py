@@ -16,7 +16,7 @@ def HomeView(request):
     id_persona = request.session.get('idPersona')
 
     if not id_persona:
-        return redirect('login')
+        return redirect('Login')
 
     with connection.cursor() as cursor:
         cursor.execute("""
@@ -28,6 +28,106 @@ def HomeView(request):
         print(row)  # lo ves en la terminal
 
     return render(request, "users/home.html")
+
+def PerfilView(request):
+    id_persona = request.session.get('idPersona')
+
+    if not id_persona:
+        return redirect('Login')
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT nombre, apellido, correo, fecha_registro, genero, edad,
+                   paisDeOrigen, fechaDeNacimiento
+            FROM [Usuarios].[Persona]
+            WHERE idPersona = %s
+        """, [id_persona])
+        row = cursor.fetchone()
+
+    if row is None:
+        return redirect('Login')
+
+    usuario = {
+        'nombre': row[0],
+        'apellido': row[1],
+        'correo': row[2],
+        'fecha_registro': row[3],
+        'genero': row[4],
+        'edad': row[5],
+        'paisDeOrigen': row[6],
+        'fechaDeNacimiento': row[7],
+    }
+
+    return render(request, "users/perfil.html", {'usuario': usuario})
+
+def PerfilUpdateView(request):
+    id_persona = request.session.get('idPersona')
+
+    if not id_persona:
+        return redirect('Login')
+
+    if request.method != 'POST':
+        return redirect('perfil')
+
+    nombre = request.POST.get('nombre', '').strip()
+    apellido = request.POST.get('apellido', '').strip()
+    correo = request.POST.get('correo', '').strip()
+    genero = request.POST.get('genero', '').strip()
+    edad = request.POST.get('edad') or None
+    pais_de_origen = request.POST.get('paisDeOrigen', '').strip()
+    fecha_de_nacimiento = request.POST.get('fechaDeNacimiento') or None
+    contrasenia_actual = request.POST.get('contrasenia_actual', '')
+    contrasenia_nueva = request.POST.get('contrasenia_nueva', '')
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT contrasenia
+            FROM [Usuarios].[Persona]
+            WHERE idPersona = %s
+        """, [id_persona])
+        row = cursor.fetchone()
+
+        if row is None:
+            return redirect('Login')
+
+        if contrasenia_nueva:
+            if contrasenia_actual != row[0]:
+                usuario = {
+                    'nombre': nombre,
+                    'apellido': apellido,
+                    'correo': correo,
+                    'genero': genero,
+                    'edad': edad,
+                    'paisDeOrigen': pais_de_origen,
+                    'fechaDeNacimiento': fecha_de_nacimiento,
+                }
+                return render(request, "users/perfil.html", {
+                    'usuario': usuario,
+                    'error': 'La contraseña actual no es correcta.',
+                })
+
+            cursor.execute("""
+                UPDATE [Usuarios].[Persona]
+                SET nombre = %s, apellido = %s, correo = %s, genero = %s,
+                    edad = %s, paisDeOrigen = %s, fechaDeNacimiento = %s,
+                    contrasenia = %s
+                WHERE idPersona = %s
+            """, [
+                nombre, apellido, correo, genero, edad, pais_de_origen,
+                fecha_de_nacimiento, contrasenia_nueva, id_persona
+            ])
+        else:
+            cursor.execute("""
+                UPDATE [Usuarios].[Persona]
+                SET nombre = %s, apellido = %s, correo = %s, genero = %s,
+                    edad = %s, paisDeOrigen = %s, fechaDeNacimiento = %s
+                WHERE idPersona = %s
+            """, [
+                nombre, apellido, correo, genero, edad, pais_de_origen,
+                fecha_de_nacimiento, id_persona
+            ])
+
+    return redirect('perfil')
 
 def LoginView(request):
     if request.method == 'POST':
