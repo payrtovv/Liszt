@@ -13,5 +13,6 @@ urlpatterns = [
     path('generos/', views.generos_list, name='generos'),
     path('generos/<int:genero_id>/', views.genero_detail, name='genero_detail'),
     path('discograficas/', views.discograficas_list, name='discograficas'),
-    path('home', views.Home, name='home')
+    path('home', views.Home, name='home'),
+    path('canciones/<int:cancion_id>/stream/', views.stream_cancion, name='stream_cancion'),
 ]

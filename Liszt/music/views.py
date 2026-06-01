@@ -599,4 +599,47 @@ def discograficas_list(request):
 
 
 def Home(request):
-    return render(request, 'music/music_player.html')
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT TOP 10 l.idLanzamiento, l.Nombre, l.FechaDePublicacion,
+                   l.urlPortadaLanzamiento,
+                   p.nombre + ' ' + p.apellido AS artista
+            FROM [musica].[Lanzamiento] l
+            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
+            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
+            ORDER BY l.FechaDePublicacion DESC
+        """)
+        albumes_recomendados = [
+            {
+                'idLanzamiento': r[0],
+                'nombre': r[1],
+                'año': r[2].year if r[2] else '',
+                'portada': r[3],
+                'artista': r[4],
+            }
+            for r in cursor.fetchall()
+        ]
+
+    return render(request, 'music/music_player.html', {
+        'albumes_recomendados': albumes_recomendados,
+    })
+
+
+def stream_cancion(request, cancion_id):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT urlCancion FROM [musica].[Cancion] WHERE idCancion = %s",
+            [cancion_id]
+        )
+        row = cursor.fetchone()
+
+    if not row or not row[0]:
+        from django.http import Http404
+        raise Http404
+
+    from django.http import HttpResponseRedirect
+    return HttpResponseRedirect(row[0])
