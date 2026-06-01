@@ -160,7 +160,7 @@ def LoginView(request):
 
             if contrasenia_ok:
                 request.session['idPersona'] = id_persona
-                return redirect('home')
+                return redirect('/music/home')
             else:
                 return render(request, "users/login.html", {'error': 'Contraseña incorrecta'})
 
