@@ -1,5 +1,6 @@
 from datetime import date
 
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import connection, transaction
 from django.http import HttpResponse
 from django.shortcuts import render, redirect
@@ -91,7 +92,14 @@ def PerfilUpdateView(request):
             return redirect('Login')
 
         if contrasenia_nueva:
-            if contrasenia_actual != row[0]:
+            contrasenia_guardada = row[0]
+            contrasenia_actual_ok = check_password(contrasenia_actual, contrasenia_guardada)
+
+            # Compatibilidad temporal para cuentas creadas antes de hashear.
+            if not contrasenia_actual_ok and contrasenia_actual == contrasenia_guardada:
+                contrasenia_actual_ok = True
+
+            if not contrasenia_actual_ok:
                 usuario = {
                     'nombre': nombre,
                     'apellido': apellido,
@@ -106,6 +114,8 @@ def PerfilUpdateView(request):
                     'error': 'La contraseña actual no es correcta.',
                 })
 
+            contrasenia_nueva_hash = make_password(contrasenia_nueva)
+
             cursor.execute("""
                 UPDATE [Usuarios].[Persona]
                 SET nombre = %s, apellido = %s, correo = %s, genero = %s,
@@ -114,7 +124,7 @@ def PerfilUpdateView(request):
                 WHERE idPersona = %s
             """, [
                 nombre, apellido, correo, genero, edad, pais_de_origen,
-                fecha_de_nacimiento, contrasenia_nueva, id_persona
+                fecha_de_nacimiento, contrasenia_nueva_hash, id_persona
             ])
         else:
             cursor.execute("""
@@ -146,8 +156,21 @@ def LoginView(request):
             if row is None:
                 return render(request, "users/login.html", {'error': 'Correo no encontrado'})
 
-            if row[1] == contrasenia:
-                request.session['idPersona'] = row[0]
+            id_persona = row[0]
+            contrasenia_guardada = row[1]
+            contrasenia_ok = check_password(contrasenia, contrasenia_guardada)
+
+            # Compatibilidad temporal para usuarios ya guardados con contrasenia en texto plano.
+            if not contrasenia_ok and contrasenia == contrasenia_guardada:
+                contrasenia_ok = True
+                cursor.execute("""
+                    UPDATE [Usuarios].[Persona]
+                    SET contrasenia = %s
+                    WHERE idPersona = %s
+                """, [make_password(contrasenia), id_persona])
+
+            if contrasenia_ok:
+                request.session['idPersona'] = id_persona
                 return redirect('home')
             else:
                 return render(request, "users/login.html", {'error': 'Contraseña incorrecta'})
@@ -190,6 +213,10 @@ def Register_view(request):
             (hoy.month, hoy.day) < (fecha_nacimiento.month, fecha_nacimiento.day)
         )
 
+        if edad < 15:
+            contexto['error'] = 'Debes tener al menos 15 anios para registrarte.'
+            return render(request, 'users/Register.html', contexto)
+
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT COUNT(*) FROM [usuarios].[Persona] WHERE correo = %s",
@@ -203,6 +230,8 @@ def Register_view(request):
 
         with transaction.atomic():
             with connection.cursor() as cursor:
+                contrasenia_hash = make_password(contrasenia)
+
                 cursor.execute("""
                     SET NOCOUNT ON;
 
@@ -228,7 +257,7 @@ def Register_view(request):
                     hoy,
                     genero,
                     edad,
-                    contrasenia,
+                    contrasenia_hash,
                     False,
                     pais,
                     fecha_nacimiento,
@@ -268,6 +297,7 @@ def Register_view(request):
                     nuevo_id_suscripcion
                 ])
 
+        return redirect('Login')
 
     return render(request, 'users/Register.html')
 
@@ -304,17 +334,21 @@ def RegisterArtist(request):
 
         if not all([nombre, apellido, correo, contrasenia, fechadenacimiento, genero, pais]):
             contexto['error'] = 'Todos los campos son obligatorios.'
-            return render(request, 'users/Register.html', contexto)
+            return render(request, 'users/RegisterArtist.html', contexto)
 
         if contrasenia != confirmar_contrasenia:
             contexto['error'] = 'Las contraseñas no coinciden.'
-            return render(request, 'users/Register.html', contexto)
+            return render(request, 'users/RegisterArtist.html', contexto)
 
         fecha_nacimiento = date.fromisoformat(fechadenacimiento)
         hoy = timezone.localdate()
         edad = hoy.year - fecha_nacimiento.year - (
             (hoy.month, hoy.day) < (fecha_nacimiento.month, fecha_nacimiento.day)
         )
+
+        if edad < 15:
+            contexto['error'] = 'Debes tener al menos 15 anios para registrarte.'
+            return render(request, 'users/RegisterArtist.html', contexto)
 
         with connection.cursor() as cursor:
             cursor.execute(
@@ -325,10 +359,12 @@ def RegisterArtist(request):
 
         if existe:
             contexto['error'] = 'Ya existe una cuenta con ese correo.'
-            return render(request, 'users/Register.html', contexto)
+            return render(request, 'users/RegisterArtist.html', contexto)
 
         with transaction.atomic():
             with connection.cursor() as cursor:
+                contrasenia_hash = make_password(contrasenia)
+
                 cursor.execute("""
                     SET NOCOUNT ON;
 
@@ -354,7 +390,7 @@ def RegisterArtist(request):
                     hoy,
                     genero,
                     edad,
-                    contrasenia,
+                    contrasenia_hash,
                     False,
                     pais,
                     fecha_nacimiento,
@@ -406,5 +442,6 @@ def RegisterArtist(request):
                                 )values(%s,%s)
                                 """,[nuevo_id_persona, id_genero ])
 
+        return redirect('Login')
 
     return render(request, 'users/RegisterArtist.html')
