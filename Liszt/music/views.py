@@ -220,7 +220,7 @@ def lanzamiento_detail(request, lanzamiento_id):
 
     with connection.cursor() as cursor:
         cursor.execute("""
-            SELECT idCancion, nombre, duracion, NumeroDePista, reproducciones
+            SELECT idCancion, nombre, [duración], NumeroDePista, reproducciones
             FROM [musica].[Cancion]
             WHERE Lanzamiento_idLanzamiento = %s
             ORDER BY NumeroDePista
@@ -397,7 +397,7 @@ def canciones_buscar(request):
 
         if filtro == 'nombre':
             sql = """
-                SELECT c.idCancion, c.nombre, c.duracion, c.reproducciones,
+                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
                        l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
                        l.idLanzamiento, l.idArtista
                 FROM [musica].[Cancion] c
@@ -411,7 +411,7 @@ def canciones_buscar(request):
 
         elif filtro == 'genero':
             sql = """
-                SELECT c.idCancion, c.nombre, c.duracion, c.reproducciones,
+                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
                        l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
                        l.idLanzamiento, l.idArtista
                 FROM [musica].[Cancion] c
@@ -426,7 +426,7 @@ def canciones_buscar(request):
 
         elif filtro == 'artista':
             sql = """
-                SELECT c.idCancion, c.nombre, c.duracion, c.reproducciones,
+                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
                        l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
                        l.idLanzamiento, l.idArtista
                 FROM [musica].[Cancion] c
@@ -440,7 +440,7 @@ def canciones_buscar(request):
 
         else:  # album
             sql = """
-                SELECT c.idCancion, c.nombre, c.duracion, c.reproducciones,
+                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
                        l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
                        l.idLanzamiento, l.idArtista
                 FROM [musica].[Cancion] c
@@ -526,7 +526,7 @@ def genero_detail(request, genero_id):
 
     with connection.cursor() as cursor:
         cursor.execute("""
-            SELECT c.idCancion, c.nombre, c.duracion, c.reproducciones,
+            SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
                    l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
                    l.idLanzamiento
             FROM [musica].[Cancion] c

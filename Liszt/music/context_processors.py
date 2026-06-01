@@ -16,7 +16,7 @@ def sidebar_data(request):
 
     with connection.cursor() as cursor:
         cursor.execute("""
-            SELECT c.idCancion, c.nombre, c.duracion,
+            SELECT c.idCancion, c.nombre, c.[duración],
                    p.nombre + ' ' + p.apellido AS artista
             FROM [musica].[Cancion] c
             INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
