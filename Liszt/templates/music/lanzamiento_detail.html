@@ -1,5 +1,4 @@
 {% extends 'music/base_music.html' %}
-
 {% block title %}{{ lanzamiento.nombre }} - Liszt{% endblock %}
 {% block nav_artistas %}active{% endblock %}
 {% block page_title %}{{ lanzamiento.nombre }}{% endblock %}
@@ -19,8 +18,15 @@
       </div>
     </div>
     {% if es_propio %}
-    <div>
-      <a class="btn btn-secondary" href="{% url 'lanzamiento_editar' lanzamiento_id=lanzamiento.idLanzamiento %}">✏ Editar</a>
+    <div style="display:flex; gap:8px; flex-direction:column; align-items:flex-end;">
+      <a class="btn btn-secondary"
+         href="{% url 'lanzamiento_editar' lanzamiento_id=lanzamiento.idLanzamiento %}">
+        ✏ Editar
+      </a>
+      <a class="btn btn-primary"
+         href="{% url 'cancion_crear' lanzamiento_id=lanzamiento.idLanzamiento %}">
+        + Agregar canción
+      </a>
     </div>
     {% endif %}
   </div>
@@ -36,20 +42,72 @@
         <th>Título</th>
         <th>Duración</th>
         <th>Reproducciones</th>
+        {% if es_propio %}<th></th>{% endif %}
       </tr>
     </thead>
     <tbody>
       {% for c in canciones %}
-      <tr>
+      <tr
+        style="cursor:pointer;"
+        onclick="seleccionarCancion('{{ c.idCancion }}', '{{ c.nombre }}', '{{ lanzamiento.artista }}')"
+      >
         <td style="color:#555">{{ c.pista }}</td>
         <td><strong style="color:#fff">{{ c.nombre }}</strong></td>
         <td>{{ c.duracion }}</td>
         <td>{{ c.reproducciones }}</td>
+        {% if es_propio %}
+        <td>
+          <form method="post"
+                action="{% url 'cancion_eliminar' cancion_id=c.idCancion %}"
+                onsubmit="return confirm('¿Eliminar esta canción?')"
+                onclick="event.stopPropagation()">
+            {% csrf_token %}
+            <button type="submit"
+                    style="background:none; border:none; color:#e55; cursor:pointer; font-size:18px;"
+                    title="Eliminar canción">
+              🗑
+            </button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
   </table>
 {% else %}
-  <div class="empty">Este lanzamiento no tiene canciones registradas.</div>
+  <div class="empty">
+    Este lanzamiento no tiene canciones.
+    {% if es_propio %}
+      <a href="{% url 'cancion_crear' lanzamiento_id=lanzamiento.idLanzamiento %}">
+        Agrega la primera aquí.
+      </a>
+    {% endif %}
+  </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function seleccionarCancion(id, titulo, artista) {
+  const url = `/music/canciones/${id}/stream/`;
+  // Buscar si ya existe en el sidebar, si no, cargar directo
+  const items = document.querySelectorAll('.song-item');
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].dataset.url === url) {
+      selectSong(i);
+      return;
+    }
+  }
+  // No está en el sidebar: cargarlo en el player directamente
+  document.getElementById('npTitle').textContent = titulo;
+  document.getElementById('npArtist').textContent = artista;
+  const audio = document.getElementById('audioPlayer');
+  audio.src = url;
+  audio.play();
+  document.getElementById('playIcon').className = 'ti ti-player-pause';
+  localStorage.setItem('lz_song_url', url);
+  localStorage.setItem('lz_song_title', titulo);
+  localStorage.setItem('lz_song_artist', artista);
+}
+</script>
 {% endblock %}

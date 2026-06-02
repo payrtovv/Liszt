@@ -1,3 +1,6 @@
+import os
+from django.conf import settings
+from django.http import Http404, FileResponse
 from django.db import connection, transaction
 from django.shortcuts import render, redirect
 
@@ -252,38 +255,140 @@ def lanzamiento_crear(request):
 
     mi_artista_id = _get_artista_id(id_persona)
     if not mi_artista_id:
-        return redirect('artistas')
+        return redirect('home')
 
     with connection.cursor() as cursor:
         cursor.execute("SELECT idGenero, nombre FROM [musica].[Genero] ORDER BY nombre")
         generos = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
 
+    lanzamiento_id_sesion = request.session.get('lanzamiento_en_curso')
+    lanzamiento_creado = None
+    canciones_subidas = []
     error = None
+    error_cancion = request.session.pop('error_cancion', None)
 
-    if request.method == 'POST':
-        nombre = request.POST.get('nombre', '').strip()
-        fecha = request.POST.get('fecha')
-        tipo = request.POST.get('tipo')
-        genero_id = request.POST.get('genero')
+    if lanzamiento_id_sesion:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT l.idLanzamiento, l.Nombre, l.tipoDeLanzamiento,
+                       l.FechaDePublicacion, g.nombre
+                FROM [musica].[Lanzamiento] l
+                INNER JOIN [musica].[Genero] g ON g.idGenero = l.Genero_idGenero
+                WHERE l.idLanzamiento = %s AND l.idArtista = %s
+            """, [lanzamiento_id_sesion, mi_artista_id])
+            row = cursor.fetchone()
 
-        if not all([nombre, fecha, tipo, genero_id]):
-            error = 'Todos los campos son obligatorios.'
-        else:
+        if row:
+            lanzamiento_creado = {
+                'idLanzamiento': row[0],
+                'nombre': row[1],
+                'tipo': row[2],
+                'fecha': row[3],
+                'genero_nombre': row[4],
+            }
             with connection.cursor() as cursor:
                 cursor.execute("""
-                    SET NOCOUNT ON;
-                    INSERT INTO [musica].[Lanzamiento]
-                        (idArtista, Genero_idGenero, Nombre, FechaDePublicacion, tipoDeLanzamiento)
-                    VALUES (%s, %s, %s, %s, %s);
-                    SELECT CONVERT(int, SCOPE_IDENTITY());
-                """, [mi_artista_id, genero_id, nombre, fecha, tipo])
-                nuevo_id = cursor.fetchone()[0]
-            return redirect('lanzamiento_detail', lanzamiento_id=nuevo_id)
+                    SELECT idCancion, nombre, duracion, NumeroDePista
+                    FROM [musica].[Cancion]
+                    WHERE Lanzamiento_idLanzamiento = %s
+                    ORDER BY NumeroDePista
+                """, [lanzamiento_id_sesion])
+                canciones_subidas = [
+                    {
+                        'idCancion': r[0],
+                        'nombre': r[1],
+                        'duracion': f"{r[2] // 60}:{r[2] % 60:02d}" if r[2] else '0:00',
+                        'pista': r[3],
+                    }
+                    for r in cursor.fetchall()
+                ]
+
+    if request.method == 'POST':
+        accion = request.POST.get('accion', '')
+        print(f">>> POST recibido, accion={accion}")
+        print(f">>> session antes: {request.session.get('lanzamiento_en_curso')}")
+
+        # ── Paso 1: crear lanzamiento ──
+        if accion == 'crear_lanzamiento':
+            nombre = request.POST.get('nombre', '').strip()
+            fecha  = request.POST.get('fecha')
+            tipo   = request.POST.get('tipo')
+            genero_id = request.POST.get('genero')
+
+            if not all([nombre, fecha, tipo, genero_id]):
+                error = 'Todos los campos son obligatorios.'
+            else:
+                with connection.cursor() as cursor:
+                    cursor.execute("""
+                        SET NOCOUNT ON;
+                        INSERT INTO [musica].[Lanzamiento]
+                            (idArtista, Genero_idGenero, Nombre, FechaDePublicacion, tipoDeLanzamiento)
+                        VALUES (%s, %s, %s, %s, %s);
+                        SELECT CONVERT(int, SCOPE_IDENTITY());
+                    """, [mi_artista_id, genero_id, nombre, fecha, tipo])
+                    nuevo_id = cursor.fetchone()[0]
+
+                request.session['lanzamiento_en_curso'] = nuevo_id
+                request.session.modified = True  # <-- AGREGA ESTA LÍNEA
+                print(f">>> session guardada: {request.session.get('lanzamiento_en_curso')}")
+                return redirect('lanzamiento_crear')
+
+        # ── Paso 2: subir canción ──
+        elif accion == 'subir_cancion' and lanzamiento_id_sesion:
+            nombre_cancion = request.POST.get('nombre', '').strip()
+            archivo = request.FILES.get('audio')
+
+            if not nombre_cancion or not archivo:
+                error_cancion = 'El nombre y el archivo son obligatorios.'
+            else:
+                ext = os.path.splitext(archivo.name)[1].lower()
+                if ext not in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+                    error_cancion = 'Formato no permitido. Usa MP3, WAV, OGG, FLAC o M4A.'
+                else:
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT ISNULL(MAX(NumeroDePista), 0) + 1 FROM [musica].[Cancion] WHERE Lanzamiento_idLanzamiento = %s",
+                            [lanzamiento_id_sesion]
+                        )
+                        siguiente_pista = cursor.fetchone()[0]
+
+                    carpeta = os.path.join(settings.MEDIA_ROOT, 'canciones', str(lanzamiento_id_sesion))
+                    os.makedirs(carpeta, exist_ok=True)
+
+                    nombre_archivo = f"pista_{siguiente_pista}_{nombre_cancion.replace(' ', '_')}{ext}"
+                    ruta_completa = os.path.join(carpeta, nombre_archivo)
+
+                    with open(ruta_completa, 'wb+') as destino:
+                        for chunk in archivo.chunks():
+                            destino.write(chunk)
+
+                    url_audio = f"/media/canciones/{lanzamiento_id_sesion}/{nombre_archivo}"
+
+                    duracion = 0
+                    try:
+                        from mutagen import File as MutagenFile
+                        audio_info = MutagenFile(ruta_completa)
+                        if audio_info and audio_info.info:
+                            duracion = int(audio_info.info.length)
+                    except Exception:
+                        pass
+
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            INSERT INTO [musica].[Cancion]
+                                (nombre, duracion, Lanzamiento_idLanzamiento,
+                                 NumeroDePista, url_audio, reproducciones)
+                            VALUES (%s, %s, %s, %s, %s, 0)
+                        """, [nombre_cancion, duracion, lanzamiento_id_sesion, siguiente_pista, url_audio])
+
+                    return redirect('lanzamiento_crear')
 
     return render(request, 'music/lanzamiento_form.html', {
         'generos': generos,
-        'accion': 'Crear',
+        'lanzamiento_creado': lanzamiento_creado,
+        'canciones_subidas': canciones_subidas,
         'error': error,
+        'error_cancion': error_cancion,
     })
 
 
@@ -632,14 +737,412 @@ def Home(request):
 def stream_cancion(request, cancion_id):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT urlCancion FROM [musica].[Cancion] WHERE idCancion = %s",
+            "SELECT url_audio FROM [musica].[Cancion] WHERE idCancion = %s",
             [cancion_id]
         )
         row = cursor.fetchone()
 
     if not row or not row[0]:
-        from django.http import Http404
         raise Http404
 
+    url_audio = row[0]
+
+    # Si es una URL local /media/... la servimos como FileResponse
+    if url_audio.startswith('/media/'):
+        ruta = os.path.join(settings.BASE_DIR, url_audio.lstrip('/'))
+        if not os.path.exists(ruta):
+            raise Http404
+        ext = os.path.splitext(ruta)[1].lower()
+        content_types = {
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.ogg': 'audio/ogg',
+            '.flac': 'audio/flac',
+            '.m4a': 'audio/mp4',
+        }
+        content_type = content_types.get(ext, 'audio/mpeg')
+        return FileResponse(open(ruta, 'rb'), content_type=content_type)
+
+    # Si es URL externa, redirigir
     from django.http import HttpResponseRedirect
     return HttpResponseRedirect(row[0])
+    return HttpResponseRedirect(url_audio)
+
+def cancion_crear(request, lanzamiento_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    mi_artista_id = _get_artista_id(id_persona)
+    if not mi_artista_id:
+        return redirect('artistas')
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT idArtista FROM [musica].[Lanzamiento] WHERE idLanzamiento = %s",
+            [lanzamiento_id]
+        )
+        row = cursor.fetchone()
+
+    if not row or row[0] != mi_artista_id:
+        return redirect('artistas')
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT ISNULL(MAX(NumeroDePista), 0) + 1 FROM [musica].[Cancion] WHERE Lanzamiento_idLanzamiento = %s",
+            [lanzamiento_id]
+        )
+        siguiente_pista = cursor.fetchone()[0]
+
+    if request.method == 'POST':
+        nombre = request.POST.get('nombre', '').strip()
+        archivo = request.FILES.get('audio')
+
+        if not nombre or not archivo:
+            request.session['error_cancion'] = 'El nombre y el archivo son obligatorios.'
+            return redirect('lanzamiento_crear')
+
+        ext = os.path.splitext(archivo.name)[1].lower()
+        if ext not in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
+            request.session['error_cancion'] = 'Formato no permitido.'
+            return redirect('lanzamiento_crear')
+
+        carpeta = os.path.join(settings.MEDIA_ROOT, 'canciones', str(lanzamiento_id))
+        os.makedirs(carpeta, exist_ok=True)
+
+        nombre_archivo = f"pista_{siguiente_pista}_{nombre.replace(' ', '_')}{ext}"
+        ruta_completa = os.path.join(carpeta, nombre_archivo)
+
+        with open(ruta_completa, 'wb+') as destino:
+            for chunk in archivo.chunks():
+                destino.write(chunk)
+
+        url_audio = f"/media/canciones/{lanzamiento_id}/{nombre_archivo}"
+
+        duracion = 0
+        try:
+            from mutagen import File as MutagenFile
+            audio_info = MutagenFile(ruta_completa)
+            if audio_info and audio_info.info:
+                duracion = int(audio_info.info.length)
+        except Exception:
+            pass
+
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO [musica].[Cancion]
+                    (nombre, duracion, Lanzamiento_idLanzamiento,
+                     NumeroDePista, url_audio, reproducciones)
+                VALUES (%s, %s, %s, %s, %s, 0)
+            """, [nombre, duracion, lanzamiento_id, siguiente_pista, url_audio])
+
+        # Volver al paso 2
+        request.session['lanzamiento_en_curso'] = lanzamiento_id
+        return redirect('lanzamiento_crear')
+
+    return redirect('lanzamiento_crear')
+
+def cancion_eliminar(request, cancion_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    mi_artista_id = _get_artista_id(id_persona)
+
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT c.url_audio, l.idLanzamiento, l.idArtista
+            FROM [musica].[Cancion] c
+            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
+            WHERE c.idCancion = %s
+        """, [cancion_id])
+        row = cursor.fetchone()
+
+    if not row or row[2] != mi_artista_id:
+        return redirect('artistas')
+
+    url_audio, lanzamiento_id, _ = row
+
+    if request.method == 'POST':
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM [pagos].[Regalias] WHERE Cancion_idCancion = %s",
+                    [cancion_id]
+                )
+                cursor.execute(
+                    "DELETE FROM [actividad].[Reproduccion] WHERE Cancion_idCancion = %s",
+                    [cancion_id]
+                )
+                cursor.execute(
+                    "DELETE FROM [usuarios].[PlaylistCancion] WHERE Cancion_idCancion = %s",
+                    [cancion_id]
+                )
+                cursor.execute(
+                    "DELETE FROM [musica].[Cancion] WHERE idCancion = %s",
+                    [cancion_id]
+                )
+
+        if url_audio:
+            ruta = os.path.join(settings.BASE_DIR, url_audio.lstrip('/'))
+            if os.path.exists(ruta):
+                os.remove(ruta)
+
+        return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
+
+    return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
+
+
+# ─── PLAYLISTS ────────────────────────────────────────────────────────────────
+
+def _get_id_usuario(id_persona):
+    if not id_persona:
+        return None
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT idUsuario FROM [usuarios].[Usuario] WHERE idPersona = %s",
+            [id_persona]
+        )
+        row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def playlist_crear(request):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    id_usuario = _get_id_usuario(id_persona)
+    print(f">>> id_persona={id_persona}, id_usuario={id_usuario}")
+    if not id_usuario:
+        return redirect('home')
+    if request.method == 'POST':
+        nombre = request.POST.get('nombre', '').strip()
+        if nombre:
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SET NOCOUNT ON;
+                    INSERT INTO [usuarios].[Playlist] (nombrePlaylist, Usuario_idUsuario)
+                    VALUES (%s, %s);
+                    SELECT CONVERT(int, SCOPE_IDENTITY());
+                """, [nombre, id_usuario])
+                nueva_id = cursor.fetchone()[0]
+            return redirect('playlist_detail', playlist_id=nueva_id)
+
+    return redirect('home')
+
+
+def playlist_detail(request, playlist_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    id_usuario = _get_id_usuario(id_persona)
+
+    # Verificar que la playlist pertenece al usuario
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT idPlaylist, nombrePlaylist, Usuario_idUsuario
+            FROM [usuarios].[Playlist]
+            WHERE idPlaylist = %s
+        """, [playlist_id])
+        row = cursor.fetchone()
+
+    if not row or row[2] != id_usuario:
+        return redirect('home')
+
+    playlist = {'idPlaylist': row[0], 'nombre': row[1]}
+
+    # Canciones en la playlist
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT c.idCancion, c.nombre, c.duracion,
+                   p.nombre + ' ' + p.apellido AS artista,
+                   l.Nombre AS album, pc.orden
+            FROM [usuarios].[PlaylistCancion] pc
+            INNER JOIN [musica].[Cancion] c ON c.idCancion = pc.Cancion_idCancion
+            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
+            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
+            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
+            WHERE pc.Playlist_idPlaylist = %s
+            ORDER BY pc.orden
+        """, [playlist_id])
+        canciones = [
+            {
+                'idCancion': r[0],
+                'nombre': r[1],
+                'duracion': f"{r[2] // 60}:{r[2] % 60:02d}" if r[2] else '0:00',
+                'artista': r[3],
+                'album': r[4],
+                'orden': r[5],
+            }
+            for r in cursor.fetchall()
+        ]
+
+    # Todas las canciones disponibles para agregar (que no estén ya)
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT c.idCancion, c.nombre,
+                   p.nombre + ' ' + p.apellido AS artista,
+                   l.Nombre AS album
+            FROM [musica].[Cancion] c
+            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
+            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
+            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
+            WHERE c.idCancion NOT IN (
+                SELECT Cancion_idCancion FROM [usuarios].[PlaylistCancion]
+                WHERE Playlist_idPlaylist = %s
+            )
+            ORDER BY c.nombre
+        """, [playlist_id])
+        canciones_disponibles = [
+            {
+                'idCancion': r[0],
+                'nombre': r[1],
+                'artista': r[2],
+                'album': r[3],
+            }
+            for r in cursor.fetchall()
+        ]
+
+    return render(request, 'music/playlist_detail.html', {
+        'playlist': playlist,
+        'canciones': canciones,
+        'canciones_disponibles': canciones_disponibles,
+    })
+
+
+def playlist_editar(request, playlist_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    id_usuario = _get_id_usuario(id_persona)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
+            [playlist_id]
+        )
+        row = cursor.fetchone()
+
+    if not row or row[0] != id_usuario:
+        return redirect('home')
+
+    if request.method == 'POST':
+        nombre = request.POST.get('nombre', '').strip()
+        if nombre:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE [usuarios].[Playlist] SET nombrePlaylist = %s WHERE idPlaylist = %s",
+                    [nombre, playlist_id]
+                )
+        return redirect('playlist_detail', playlist_id=playlist_id)
+
+    return redirect('playlist_detail', playlist_id=playlist_id)
+
+
+def playlist_eliminar(request, playlist_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    id_usuario = _get_id_usuario(id_persona)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
+            [playlist_id]
+        )
+        row = cursor.fetchone()
+
+    if not row or row[0] != id_usuario:
+        return redirect('home')
+
+    if request.method == 'POST':
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM [usuarios].[PlaylistCancion] WHERE Playlist_idPlaylist = %s",
+                    [playlist_id]
+                )
+                cursor.execute(
+                    "DELETE FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
+                    [playlist_id]
+                )
+        return redirect('home')
+
+    return redirect('playlist_detail', playlist_id=playlist_id)
+
+
+def playlist_agregar_cancion(request, playlist_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    id_usuario = _get_id_usuario(id_persona)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
+            [playlist_id]
+        )
+        row = cursor.fetchone()
+
+    if not row or row[0] != id_usuario:
+        return redirect('home')
+
+    if request.method == 'POST':
+        cancion_id = request.POST.get('cancion_id')
+        if cancion_id:
+            with connection.cursor() as cursor:
+                # Calcular siguiente orden
+                cursor.execute("""
+                    SELECT ISNULL(MAX(orden), 0) + 1
+                    FROM [usuarios].[PlaylistCancion]
+                    WHERE Playlist_idPlaylist = %s
+                """, [playlist_id])
+                orden = cursor.fetchone()[0]
+
+                # Evitar duplicados
+                cursor.execute("""
+                    SELECT COUNT(*) FROM [usuarios].[PlaylistCancion]
+                    WHERE Playlist_idPlaylist = %s AND Cancion_idCancion = %s
+                """, [playlist_id, cancion_id])
+                existe = cursor.fetchone()[0]
+
+                if not existe:
+                    cursor.execute("""
+                        INSERT INTO [usuarios].[PlaylistCancion]
+                            (Playlist_idPlaylist, Cancion_idCancion, orden)
+                        VALUES (%s, %s, %s)
+                    """, [playlist_id, cancion_id, orden])
+
+    return redirect('playlist_detail', playlist_id=playlist_id)
+
+
+def playlist_quitar_cancion(request, playlist_id, cancion_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    id_usuario = _get_id_usuario(id_persona)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
+            [playlist_id]
+        )
+        row = cursor.fetchone()
+
+    if not row or row[0] != id_usuario:
+        return redirect('home')
+
+    if request.method == 'POST':
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM [usuarios].[PlaylistCancion]
+                WHERE Playlist_idPlaylist = %s AND Cancion_idCancion = %s
+            """, [playlist_id, cancion_id])
+
+    return redirect('playlist_detail', playlist_id=playlist_id)

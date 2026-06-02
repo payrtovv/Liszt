@@ -73,7 +73,30 @@
           <i class="ti ti-building-community"></i> Discográficas
         </a>
       </div>
-      <div class="sidebar-header">Tu biblioteca</div>
+      <div class="sidebar-header" style="display:flex; align-items:center; justify-content:space-between; padding-right:12px;">
+        <span>Tu biblioteca</span>
+        <button onclick="abrirModalPlaylist()"
+                style="background:none; border:none; color:#3387c7; cursor:pointer;
+                       font-size:20px; line-height:1; padding:0;"
+                title="Nueva playlist">+</button>
+      </div>
+
+      <!-- Playlists -->
+      <div style="padding: 4px 0; border-bottom: 1px solid #1a1a1a;">
+        {% for pl in sidebar_playlists %}
+        <a href="{% url 'playlist_detail' playlist_id=pl.id %}"
+           style="display:flex; align-items:center; gap:8px; padding:7px 14px;
+                  color:#aaa; text-decoration:none; font-size:13px; border-radius:6px; margin:1px 6px;"
+           onmouseover="this.style.background='#1a1a1a'; this.style.color='#ddd'"
+           onmouseout="this.style.background=''; this.style.color='#aaa'">
+          <i class="ti ti-playlist" style="font-size:15px; color:#555;"></i>
+          {{ pl.nombre }}
+        </a>
+        {% empty %}
+        <p style="color:#444; padding:8px 16px; font-size:12px;">Sin playlists aún</p>
+        {% endfor %}
+      </div>
+
       <div class="song-list" id="songList">
         {% for cancion in sidebar_canciones %}
         <div
@@ -97,6 +120,40 @@
         <p style="color:#555; padding:16px; font-size:13px">No hay canciones aún.</p>
         {% endfor %}
       </div>
+
+      <!-- Modal crear playlist -->
+      <div id="modalPlaylist"
+           style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7);
+                  z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:#1a1a1a; border:1px solid #333; border-radius:12px;
+                    padding:28px; width:340px; box-shadow:0 8px 32px #000;">
+          <h3 style="margin:0 0 20px; color:#fff; font-size:16px;">Nueva playlist</h3>
+          <form method="post" action="{% url 'playlist_crear' %}">
+            {% csrf_token %}
+            <div style="margin-bottom:16px;">
+              <label style="color:#aaa; font-size:13px; display:block; margin-bottom:6px;">
+                Nombre
+              </label>
+              <input type="text" name="nombre" maxlength="30" required
+                     placeholder="Mi playlist..."
+                     style="width:100%; background:#111; border:1px solid #333; border-radius:6px;
+                            color:#fff; padding:8px 12px; font-size:14px; box-sizing:border-box;">
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+              <button type="button" onclick="cerrarModalPlaylist()"
+                      style="background:#2a2a2a; border:none; color:#aaa; padding:8px 16px;
+                             border-radius:6px; cursor:pointer; font-size:13px;">
+                Cancelar
+              </button>
+              <button type="submit"
+                      style="background:#3387c7; border:none; color:#fff; padding:8px 16px;
+                             border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">
+                Crear
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </aside>
 
     <!-- ── Área principal ── -->
@@ -118,7 +175,7 @@
         {% block content %}{% endblock %}
       </div>
     </main>
-
+    
     <!-- ── Barra de reproducción ── -->
     <div class="playerbar">
       <div class="now-playing">
@@ -281,6 +338,16 @@
         if (el) el.classList.add('active');
       }
     })();
+    function abrirModalPlaylist() {
+      const m = document.getElementById('modalPlaylist');
+      m.style.display = 'flex';
+    }
+    function cerrarModalPlaylist() {
+      document.getElementById('modalPlaylist').style.display = 'none';
+    }
+    document.getElementById('modalPlaylist').addEventListener('click', function(e) {
+      if (e.target === this) cerrarModalPlaylist();
+    });
   </script>
 
   {% block scripts %}{% endblock %}

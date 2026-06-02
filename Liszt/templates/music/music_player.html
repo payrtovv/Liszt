@@ -1,13 +1,20 @@
 {% extends 'music/base_music.html' %}
-
 {% block title %}Inicio - Liszt{% endblock %}
 {% block nav_inicio %}active{% endblock %}
 {% block page_title %}Inicio{% endblock %}
 
 {% block content %}
+
+{% if es_artista %}
+<div style="display:flex; justify-content:flex-end; margin-bottom:20px;">
+  <a class="btn btn-primary" href="{% url 'lanzamiento_crear' %}">
+    + Subir música
+  </a>
+</div>
+{% endif %}
+
 <div class="section-label">Recomendados para ti</div>
 <div class="section-sub">Basado en tus últimas escuchas</div>
-
 <div class="albums-grid">
   {% for album in albumes_recomendados %}
   <div
@@ -17,7 +24,7 @@
   >
     {% if album.portada %}
     <img class="album-cover" src="{{ album.portada }}" alt="{{ album.nombre }}"
-         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'" />
+      onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'" />
     {% endif %}
     <div class="album-cover-placeholder" {% if album.portada %}style="display:none"{% endif %}>
       <i class="ti ti-vinyl" aria-hidden="true"></i>

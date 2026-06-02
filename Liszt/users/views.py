@@ -412,7 +412,27 @@ def RegisterArtist(request):
                     id_discografica,
                     biografia
                 ])
-                
+                cursor.execute("""
+                    SET NOCOUNT ON;
+                    INSERT INTO [usuarios].[Suscripcion] (
+                        tipoSuscripcion,
+                        fechaInicioSuscripcion,
+                        estadoSuscripcion
+                    )
+                    VALUES (%s, %s, %s);
+                    SELECT CONVERT(int, SCOPE_IDENTITY());
+                """, ["Gratuita", timezone.now(), "Activa"])
+
+                nuevo_id_suscripcion = cursor.fetchone()[0]
+
+                cursor.execute("""
+                    INSERT INTO [usuarios].[Usuario] (
+                        idPersona,
+                        tipoDeCuenta,
+                        Suscripcion_idSuscripcion
+                    )
+                    VALUES (%s, %s, %s)
+                """, [nuevo_id_persona, 'gratuita', nuevo_id_suscripcion])
                 
                 for x in generos:
                     cursor.execute("SELECT idGenero from [musica].[Genero] where nombre = %s", [x])
