@@ -5,52 +5,72 @@ from django.db import connection, transaction
 from django.http import HttpResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
+from datetime import date
+from django.shortcuts import render, redirect
+from django.contrib.auth.hashers import make_password
+from django.utils import timezone
+from Liszt.mongodb import db
+from bson import ObjectId
 
 
 
-
-# Create your views here.
 def index(request):
     return HttpResponse("prueba")
 
-def HomeView(request):
-    id_persona = request.session.get('idPersona')
-    if not id_persona:
-        return redirect('Login')
-    return redirect('/music/home')
+
+# Create your views here.
+
+
+
+#def HomeView(request):
+    #id_persona = request.session.get('idPersona')
+    #if not id_persona:
+        #return redirect('Login')
+    #return redirect('/music/home')
 
 def PerfilView(request):
-    id_persona = request.session.get('idPersona')
+    id_usuario = request.session.get('idPersona')
 
-    if not id_persona:
+    if not id_usuario:
         return redirect('Login')
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT nombre, apellido, correo, fecha_registro, genero, edad,
-                   paisDeOrigen, fechaDeNacimiento
-            FROM [Usuarios].[Persona]
-            WHERE idPersona = %s
-        """, [id_persona])
-        row = cursor.fetchone()
+    usuarios = db["Usuarios"]
 
-    if row is None:
+    usuario_doc = usuarios.find_one({
+        "_id": ObjectId(id_usuario)
+    })
+
+    if not usuario_doc:
         return redirect('Login')
 
     usuario = {
-        'nombre': row[0],
-        'apellido': row[1],
-        'correo': row[2],
-        'fecha_registro': row[3],
-        'genero': row[4],
-        'edad': row[5],
-        'paisDeOrigen': row[6],
-        'fechaDeNacimiento': row[7],
+        'nombre': usuario_doc.get('Nombre'),
+        'apellido': usuario_doc.get('Apellido'),
+        'correo': usuario_doc.get('Correo'),
+        'fecha_registro': usuario_doc.get('Fecha_Registro'),
+        'genero': usuario_doc.get('Genero'),
+        'edad': usuario_doc.get('Edad'),
+        'paisDeOrigen': usuario_doc.get('PaisOrigen'),
+        'fechaDeNacimiento': usuario_doc.get('FechaNacimiento'),
     }
 
     return render(request, "users/perfil.html", {'usuario': usuario})
 
-def PerfilUpdateView(request):
+def eliminar_usuario(request):
+    id_usuario = request.session.get('idPersona')
+
+    if id_usuario:
+        db["Usuarios"].delete_one({
+            "_id": ObjectId(id_usuario)
+        })
+
+        request.session.flush() 
+
+    return redirect('Login')
+
+
+
+def _PerfilUpdateViewSqlLegacy(request):
     id_persona = request.session.get('idPersona')
 
     if not id_persona:
@@ -128,41 +148,115 @@ def PerfilUpdateView(request):
 
     return redirect('perfil')
 
+def PerfilUpdateView(request):
+    id_persona = request.session.get('idPersona')
+
+    if not id_persona:
+        return redirect('Login')
+
+    if request.method != 'POST':
+        return redirect('perfil')
+
+    nombre = request.POST.get('nombre', '').strip()
+    apellido = request.POST.get('apellido', '').strip()
+    correo = request.POST.get('correo', '').strip()
+    genero = request.POST.get('genero', '').strip()
+    pais_de_origen = request.POST.get('paisDeOrigen', '').strip()
+    fecha_de_nacimiento = request.POST.get('fechaDeNacimiento') or None
+    contrasenia_actual = request.POST.get('contrasenia_actual', '')
+    contrasenia_nueva = request.POST.get('contrasenia_nueva', '')
+
+    usuarios = db["Usuarios"]
+
+    try:
+        usuario_doc = usuarios.find_one({"_id": ObjectId(id_persona)})
+    except Exception:
+        usuario_doc = None
+
+    if not usuario_doc:
+        return redirect('Login')
+    
+    fecha_nacimiento = date.fromisoformat(fecha_de_nacimiento)
+    
+    hoy = timezone.localdate()
+    
+    edad = hoy.year - fecha_nacimiento.year - (
+        (hoy.month, hoy.day) <
+        (fecha_nacimiento.month, fecha_nacimiento.day)
+    )
+
+
+    cambios = {
+        "Nombre": nombre,
+        "Apellido": apellido,
+        "Correo": correo,
+        "Genero": genero,
+        "Edad": edad,
+        "PaisOrigen": pais_de_origen,
+        "FechaNacimiento": fecha_de_nacimiento,
+    }
+
+    if contrasenia_nueva:
+        contrasenia_guardada = usuario_doc.get("Contrasenia", "")
+        contrasenia_actual_ok = check_password(contrasenia_actual, contrasenia_guardada)
+
+        # Compatibilidad temporal para cuentas creadas antes de hashear.
+        if not contrasenia_actual_ok and contrasenia_actual == contrasenia_guardada:
+            contrasenia_actual_ok = True
+
+        if not contrasenia_actual_ok:
+            usuario = {
+                'nombre': nombre,
+                'apellido': apellido,
+                'correo': correo,
+                'genero': genero,
+                'edad': edad,
+                'paisDeOrigen': pais_de_origen,
+                'fechaDeNacimiento': fecha_de_nacimiento,
+            }
+            return render(request, "users/perfil.html", {
+                'usuario': usuario,
+                'error': 'La contraseña actual no es correcta.',
+            })
+
+        cambios["Contrasenia"] = make_password(contrasenia_nueva)
+
+    usuarios.update_one(
+        {"_id": ObjectId(id_persona)},
+        {"$set": cambios},
+    )
+
+    return redirect('perfil')
+
+
 def LoginView(request):
     if request.method == 'POST':
         mail = request.POST.get('correo')
         contrasenia = request.POST.get('contrasenia')
 
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT idPersona, contrasenia 
-                FROM [Usuarios].[Persona]
-                WHERE correo = %s       
-            """, [mail])
+        usuarios = db["Usuarios"]
 
-            row = cursor.fetchone()
+        usuario = usuarios.find_one({"Correo": mail})
 
-            if row is None:
-                return render(request, "users/login.html", {'error': 'Correo no encontrado'})
+        if usuario is None:
+            return render(
+                request,
+                "users/login.html",
+                {'error': 'Correo no encontrado'}
+            )
 
-            id_persona = row[0]
-            contrasenia_guardada = row[1]
-            contrasenia_ok = check_password(contrasenia, contrasenia_guardada)
+        if check_password(contrasenia, usuario["Contrasenia"]):
+            request.session['idUsuario'] = str(usuario["_id"])
+            request.session['correo'] = usuario["Correo"]
+            request.session['idPersona'] = str(usuario["_id"])
 
-            # Compatibilidad temporal para usuarios ya guardados con contrasenia en texto plano.
-            if not contrasenia_ok and contrasenia == contrasenia_guardada:
-                contrasenia_ok = True
-                cursor.execute("""
-                    UPDATE [Usuarios].[Persona]
-                    SET contrasenia = %s
-                    WHERE idPersona = %s
-                """, [make_password(contrasenia), id_persona])
+            return redirect('/music/home')
 
-            if contrasenia_ok:
-                request.session['idPersona'] = id_persona
-                return redirect('/music/home')
-            else:
-                return render(request, "users/login.html", {'error': 'Contraseña incorrecta'})
+        return render(
+            request,
+            "users/login.html",
+            {'error': 'Contraseña incorrecta'}
+        )
 
     return render(request, "users/login.html")
 
@@ -186,9 +280,8 @@ def Register_view(request):
             'PaisDeOrigen': pais,
         }
 
-        print(contexto)
-
-        if not all([nombre, apellido, correo, contrasenia, fechadenacimiento, genero, pais]):
+        if not all([nombre, apellido, correo, contrasenia, confirmar_contrasenia,
+                    fechadenacimiento, genero, pais]):
             contexto['error'] = 'Todos los campos son obligatorios.'
             return render(request, 'users/Register.html', contexto)
 
@@ -196,99 +289,68 @@ def Register_view(request):
             contexto['error'] = 'Las contraseñas no coinciden.'
             return render(request, 'users/Register.html', contexto)
 
-        fecha_nacimiento = date.fromisoformat(fechadenacimiento)
+        try:
+            fecha_nacimiento = date.fromisoformat(fechadenacimiento)
+        except ValueError:
+            contexto['error'] = 'Fecha de nacimiento inválida.'
+            return render(request, 'users/Register.html', contexto)
+
         hoy = timezone.localdate()
+
         edad = hoy.year - fecha_nacimiento.year - (
-            (hoy.month, hoy.day) < (fecha_nacimiento.month, fecha_nacimiento.day)
+            (hoy.month, hoy.day) <
+            (fecha_nacimiento.month, fecha_nacimiento.day)
         )
 
         if edad < 15:
-            contexto['error'] = 'Debes tener al menos 15 anios para registrarte.'
+            contexto['error'] = 'Debes tener al menos 15 años para registrarte.'
             return render(request, 'users/Register.html', contexto)
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) FROM [usuarios].[Persona] WHERE correo = %s",
-                [correo]
-            )
-            existe = cursor.fetchone()[0]
+        usuarios = db["Usuarios"]
+
+        existe = usuarios.find_one({"Correo": correo})
 
         if existe:
             contexto['error'] = 'Ya existe una cuenta con ese correo.'
             return render(request, 'users/Register.html', contexto)
 
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                contrasenia_hash = make_password(contrasenia)
+        contrasenia_hash = make_password(contrasenia)
 
-                cursor.execute("""
-                    SET NOCOUNT ON;
+        usuarios.insert_one({
+            "Nombre": nombre,
+            "Apellido": apellido,
+            "Correo": correo,
+            "Contrasenia": contrasenia_hash,
+            "Fecha_Registro": hoy.isoformat(),
+            "Genero": genero,
+            "Edad": edad,
+            "PaisOrigen": pais,
+            "FechaNacimiento": fecha_nacimiento.isoformat(),
+            "TipoCuenta": "gratuita",
 
-                    INSERT INTO [usuarios].[Persona] (
-                        nombre,
-                        apellido,
-                        correo,
-                        fecha_registro,
-                        genero,
-                        edad,
-                        contrasenia,
-                        verificado,
-                        paisDeOrigen,
-                        fechaDeNacimiento
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+            "Suscripcion": {
+                "TipoSuscripcion": "Gratuita",
+                "FechaInicioSuscripcion": hoy.isoformat(),
+                "EstadoSuscripcion": "Activa"
+            },
 
-                    SELECT CONVERT(int, SCOPE_IDENTITY());
-                """, [
-                    nombre,
-                    apellido,
-                    correo,
-                    hoy,
-                    genero,
-                    edad,
-                    contrasenia_hash,
-                    False,
-                    pais,
-                    fecha_nacimiento,
-                ])
+            "PerfilArtista": {
+                "NombreArtistico": "",
+                "Biografia": "",
+                "Generos": [],
+                "Discografia": ""
+            },
 
-                nuevo_id_persona = cursor.fetchone()[0]
+            "ArtistasSeguidos": [],
+            "HistorialPagos": []
+        })
 
-                cursor.execute("""
-                    SET NOCOUNT ON;
-
-                    INSERT INTO [usuarios].[Suscripcion] (
-                        tipoSuscripcion,
-                        fechaInicioSuscripcion,
-                        estadoSuscripcion
-                    )
-                    VALUES (%s, %s, %s);
-
-                    SELECT CONVERT(int, SCOPE_IDENTITY());
-                """, [
-                    "Gratuita",
-                    timezone.now(),
-                    "Activa"
-                ])
-
-                nuevo_id_suscripcion = cursor.fetchone()[0]
-
-                cursor.execute("""
-                    INSERT INTO [usuarios].[Usuario] (
-                        idPersona,
-                        tipoDeCuenta,
-                        Suscripcion_idSuscripcion
-                    )
-                    VALUES (%s, %s, %s)
-                """, [
-                    nuevo_id_persona,
-                    'gratuita',
-                    nuevo_id_suscripcion
-                ])
+        print(fecha_nacimiento.isoformat())
 
         return redirect('Login')
 
     return render(request, 'users/Register.html')
+
 
 
 def RegisterArtist(request):

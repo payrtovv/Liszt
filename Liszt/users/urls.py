@@ -6,7 +6,8 @@ urlpatterns = [
     path("Register/", views.Register_view, name="Register"),
     path("RegisterArtist", views.RegisterArtist, name="RegisterArtist"),
     path("Login", views.LoginView, name="Login"),
-    path("home", views.HomeView, name="home"),
+    #path("home", views.HomeView, name="home"),
     path("perfil/", views.PerfilView, name="perfil"),
     path("perfil/actualizar/", views.PerfilUpdateView, name="perfil_update"),
+    path('eliminar_usuario/', views.eliminar_usuario, name='eliminar_usuario')
 ]

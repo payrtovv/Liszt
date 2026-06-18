@@ -198,6 +198,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   padding: 10px 20px;
 }
 
+.btn-secondaryBorrar {
+  background: transparent;
+  border: 1px solid red;
+  color: #aaa;
+  padding: 10px 20px;
+}
+
+
+
 .btn-secondary:hover {
   border-color: #666;
   color: #fff;

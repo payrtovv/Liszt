@@ -3,7 +3,9 @@ from django.conf import settings
 from django.http import Http404, FileResponse
 from django.db import connection, transaction
 from django.shortcuts import render, redirect
-
+from django.shortcuts import render, redirect
+from bson import ObjectId
+from Liszt.mongodb import db
 
 def _get_id_persona(request):
     return request.session.get('idPersona')
@@ -704,35 +706,31 @@ def discograficas_list(request):
 
 
 def Home(request):
-    id_persona = _get_id_persona(request)
-    if not id_persona:
+    id_usuario = request.session.get('idPersona')
+
+    if not id_usuario:
         return redirect('Login')
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT TOP 10 l.idLanzamiento, l.Nombre, l.FechaDePublicacion,
-                   l.urlPortadaLanzamiento,
-                   p.nombre + ' ' + p.apellido AS artista
-            FROM [musica].[Lanzamiento] l
-            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            ORDER BY l.FechaDePublicacion DESC
-        """)
-        albumes_recomendados = [
-            {
-                'idLanzamiento': r[0],
-                'nombre': r[1],
-                'año': r[2].year if r[2] else '',
-                'portada': r[3],
-                'artista': r[4],
-            }
-            for r in cursor.fetchall()
-        ]
+    usuarios = db["Usuarios"]
 
-    return render(request, 'music/music_player.html', {
-        'albumes_recomendados': albumes_recomendados,
+    usuario_doc = usuarios.find_one({
+        "_id": ObjectId(id_usuario)
     })
 
+    if not usuario_doc:
+        return redirect('Login')
+
+    usuario = {
+        "nombre": usuario_doc.get("Nombre"),
+        "apellido": usuario_doc.get("Apellido"),
+        "correo": usuario_doc.get("Correo"),
+    }
+
+    return render(request, 'music/music_player.html', {
+        'usuario': usuario,
+        'albumes_recomendados': [],
+        'artistas_recomendados': [],
+    })
 
 def stream_cancion(request, cancion_id):
     with connection.cursor() as cursor:

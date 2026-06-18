@@ -78,17 +78,13 @@ WSGI_APPLICATION = "Liszt.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "mssql",
-        "NAME": config("DB_NAME"),
-        "USER": config("DB_USER"),
-        "PASSWORD": config("DB_PASSWORD"),
-        "HOST": config("DB_HOST"),
-        "PORT": config("DB_PORT", default="1433"),
-        "OPTIONS": {
-            "driver": "ODBC Driver 18 for SQL Server",  
-            "extra_params": "TrustServerCertificate=yes;",            
-        },
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
     }
+}
+MONGODB_SETTINGS = {
+    "URI": "mongodb+srv://Admin:admin@clusterudla03.iotnrqc.mongodb.net/",
+    "DB_NAME": "Liszt"
 }
 
 # Password validation
