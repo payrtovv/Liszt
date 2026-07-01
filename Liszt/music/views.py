@@ -255,13 +255,14 @@ def lanzamiento_crear(request):
     if not id_persona:
         return redirect('Login')
 
-    mi_artista_id = _get_artista_id(id_persona)
-    if not mi_artista_id:
+    usuario_doc = _get_usuario(id_persona)
+    if not usuario_doc or not _es_artista(usuario_doc):
+        # No tiene perfil de artista -> no puede crear lanzamientos
         return redirect('home')
 
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT idGenero, nombre FROM [musica].[Genero] ORDER BY nombre")
-        generos = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
+    perfil_artista = usuario_doc.get("PerfilArtista", {})
+    lanzamientos_col = db["Lanzamientos"]
+    canciones_col = db["Canciones"]
 
     lanzamiento_id_sesion = request.session.get('lanzamiento_en_curso')
     lanzamiento_creado = None
@@ -270,69 +271,55 @@ def lanzamiento_crear(request):
     error_cancion = request.session.pop('error_cancion', None)
 
     if lanzamiento_id_sesion:
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT l.idLanzamiento, l.Nombre, l.tipoDeLanzamiento,
-                       l.FechaDePublicacion, g.nombre
-                FROM [musica].[Lanzamiento] l
-                INNER JOIN [musica].[Genero] g ON g.idGenero = l.Genero_idGenero
-                WHERE l.idLanzamiento = %s AND l.idArtista = %s
-            """, [lanzamiento_id_sesion, mi_artista_id])
-            row = cursor.fetchone()
+        try:
+            lanzamiento_doc = lanzamientos_col.find_one({
+                "_id": ObjectId(lanzamiento_id_sesion),
+                "IDArtista": ObjectId(id_persona),
+            })
+        except Exception:
+            lanzamiento_doc = None
 
-        if row:
+        if lanzamiento_doc:
             lanzamiento_creado = {
-                'idLanzamiento': row[0],
-                'nombre': row[1],
-                'tipo': row[2],
-                'fecha': row[3],
-                'genero_nombre': row[4],
+                'idLanzamiento': str(lanzamiento_doc["_id"]),
+                'nombre': lanzamiento_doc.get("NombreLanzamiento"),
+                'tipo': lanzamiento_doc.get("TipoLanzamiento"),
+                'fecha': lanzamiento_doc.get("FechaPublicacion"),
             }
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT idCancion, nombre, duracion, NumeroDePista
-                    FROM [musica].[Cancion]
-                    WHERE Lanzamiento_idLanzamiento = %s
-                    ORDER BY NumeroDePista
-                """, [lanzamiento_id_sesion])
-                canciones_subidas = [
-                    {
-                        'idCancion': r[0],
-                        'nombre': r[1],
-                        'duracion': f"{r[2] // 60}:{r[2] % 60:02d}" if r[2] else '0:00',
-                        'pista': r[3],
-                    }
-                    for r in cursor.fetchall()
-                ]
+
+            for c in canciones_col.find(
+                {"Lanzamiento.idLanzamiento": lanzamiento_doc["_id"]}
+            ).sort("NumeroPista", 1):
+                dur = c.get("Duracion") or 0
+                canciones_subidas.append({
+                    'idCancion': str(c["_id"]),
+                    'nombre': c.get("NombreCancion"),
+                    'duracion': f"{int(dur) // 60}:{int(dur) % 60:02d}",
+                    'pista': c.get("NumeroPista"),
+                })
 
     if request.method == 'POST':
         accion = request.POST.get('accion', '')
-        print(f">>> POST recibido, accion={accion}")
-        print(f">>> session antes: {request.session.get('lanzamiento_en_curso')}")
 
         # ── Paso 1: crear lanzamiento ──
         if accion == 'crear_lanzamiento':
             nombre = request.POST.get('nombre', '').strip()
-            fecha  = request.POST.get('fecha')
-            tipo   = request.POST.get('tipo')
-            genero_id = request.POST.get('genero')
+            fecha = request.POST.get('fecha')
+            tipo = request.POST.get('tipo')
 
-            if not all([nombre, fecha, tipo, genero_id]):
+            if not all([nombre, fecha, tipo]):
                 error = 'Todos los campos son obligatorios.'
             else:
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SET NOCOUNT ON;
-                        INSERT INTO [musica].[Lanzamiento]
-                            (idArtista, Genero_idGenero, Nombre, FechaDePublicacion, tipoDeLanzamiento)
-                        VALUES (%s, %s, %s, %s, %s);
-                        SELECT CONVERT(int, SCOPE_IDENTITY());
-                    """, [mi_artista_id, genero_id, nombre, fecha, tipo])
-                    nuevo_id = cursor.fetchone()[0]
-
-                request.session['lanzamiento_en_curso'] = nuevo_id
-                request.session.modified = True  # <-- AGREGA ESTA LÍNEA
-                print(f">>> session guardada: {request.session.get('lanzamiento_en_curso')}")
+                nuevo_doc = {
+                    "IDArtista": ObjectId(id_persona),
+                    "NombreLanzamiento": nombre,
+                    "FechaPublicacion": fecha,
+                    "TipoLanzamiento": tipo,
+                    "URLPortadaLanzamiento": "",
+                }
+                resultado = lanzamientos_col.insert_one(nuevo_doc)
+                request.session['lanzamiento_en_curso'] = str(resultado.inserted_id)
+                request.session.modified = True
                 return redirect('lanzamiento_crear')
 
         # ── Paso 2: subir canción ──
@@ -347,12 +334,9 @@ def lanzamiento_crear(request):
                 if ext not in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
                     error_cancion = 'Formato no permitido. Usa MP3, WAV, OGG, FLAC o M4A.'
                 else:
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT ISNULL(MAX(NumeroDePista), 0) + 1 FROM [musica].[Cancion] WHERE Lanzamiento_idLanzamiento = %s",
-                            [lanzamiento_id_sesion]
-                        )
-                        siguiente_pista = cursor.fetchone()[0]
+                    siguiente_pista = canciones_col.count_documents({
+                        "Lanzamiento.idLanzamiento": ObjectId(lanzamiento_id_sesion)
+                    }) + 1
 
                     carpeta = os.path.join(settings.MEDIA_ROOT, 'canciones', str(lanzamiento_id_sesion))
                     os.makedirs(carpeta, exist_ok=True)
@@ -375,24 +359,37 @@ def lanzamiento_crear(request):
                     except Exception:
                         pass
 
-                    with connection.cursor() as cursor:
-                        cursor.execute("""
-                            INSERT INTO [musica].[Cancion]
-                                (nombre, duracion, Lanzamiento_idLanzamiento,
-                                 NumeroDePista, url_audio, reproducciones)
-                            VALUES (%s, %s, %s, %s, %s, 0)
-                        """, [nombre_cancion, duracion, lanzamiento_id_sesion, siguiente_pista, url_audio])
+                    lanzamiento_doc = lanzamientos_col.find_one(
+                        {"_id": ObjectId(lanzamiento_id_sesion)}
+                    )
 
+                    nueva_cancion = {
+                        "NombreCancion": nombre_cancion,
+                        "Duracion": duracion,
+                        "NumeroPista": siguiente_pista,
+                        "URLAudio": url_audio,
+                        "Reproducciones": 0,
+                        "Lanzamiento": {
+                            "idLanzamiento": lanzamiento_doc["_id"],
+                            "NombreLanzamiento": lanzamiento_doc.get("NombreLanzamiento"),
+                            "TipoLanzamiento": lanzamiento_doc.get("TipoLanzamiento"),
+                            "FechaPublicacion": lanzamiento_doc.get("FechaPublicacion"),
+                            "URLPortadaLanzamiento": lanzamiento_doc.get("URLPortadaLanzamiento", ""),
+                            "Artista": {
+                                "idArtista": lanzamiento_doc["IDArtista"],
+                                "NombreArtistico": perfil_artista.get("NombreArtistico", ""),
+                            },
+                        },
+                    }
+                    canciones_col.insert_one(nueva_cancion)
                     return redirect('lanzamiento_crear')
 
     return render(request, 'music/lanzamiento_form.html', {
-        'generos': generos,
         'lanzamiento_creado': lanzamiento_creado,
         'canciones_subidas': canciones_subidas,
         'error': error,
         'error_cancion': error_cancion,
     })
-
 
 def lanzamiento_editar(request, lanzamiento_id):
     id_persona = _get_id_persona(request)
@@ -845,87 +842,53 @@ def cancion_eliminar(request, cancion_id):
     if not id_persona:
         return redirect('Login')
 
-    mi_artista_id = _get_artista_id(id_persona)
+    canciones_col = db["Canciones"]
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT c.url_audio, l.idLanzamiento, l.idArtista
-            FROM [musica].[Cancion] c
-            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-            WHERE c.idCancion = %s
-        """, [cancion_id])
-        row = cursor.fetchone()
+    try:
+        cancion_doc = canciones_col.find_one({"_id": ObjectId(cancion_id)})
+    except Exception:
+        cancion_doc = None
 
-    if not row or row[2] != mi_artista_id:
-        return redirect('artistas')
+    if not cancion_doc:
+        return redirect('home')
 
-    url_audio, lanzamiento_id, _ = row
+    idartista_cancion = cancion_doc.get("Lanzamiento", {}).get("Artista", {}).get("idArtista")
+    if str(idartista_cancion) != id_persona:
+        return redirect('home')
+
+    lanzamiento_id = str(cancion_doc["Lanzamiento"]["idLanzamiento"])
 
     if request.method == 'POST':
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "DELETE FROM [pagos].[Regalias] WHERE Cancion_idCancion = %s",
-                    [cancion_id]
-                )
-                cursor.execute(
-                    "DELETE FROM [actividad].[Reproduccion] WHERE Cancion_idCancion = %s",
-                    [cancion_id]
-                )
-                cursor.execute(
-                    "DELETE FROM [usuarios].[PlaylistCancion] WHERE Cancion_idCancion = %s",
-                    [cancion_id]
-                )
-                cursor.execute(
-                    "DELETE FROM [musica].[Cancion] WHERE idCancion = %s",
-                    [cancion_id]
-                )
+        canciones_col.delete_one({"_id": ObjectId(cancion_id)})
 
+        url_audio = cancion_doc.get("URLAudio")
         if url_audio:
             ruta = os.path.join(settings.BASE_DIR, url_audio.lstrip('/'))
             if os.path.exists(ruta):
                 os.remove(ruta)
 
-        return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
+        return redirect('lanzamiento_crear')
 
-    return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
+    return redirect('lanzamiento_crear')
 
 
 # ─── PLAYLISTS ────────────────────────────────────────────────────────────────
-
-def _get_id_usuario(id_persona):
-    if not id_persona:
-        return None
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT idUsuario FROM [usuarios].[Usuario] WHERE idPersona = %s",
-            [id_persona]
-        )
-        row = cursor.fetchone()
-    return row[0] if row else None
-
 
 def playlist_crear(request):
     id_persona = _get_id_persona(request)
     if not id_persona:
         return redirect('Login')
 
-    id_usuario = _get_id_usuario(id_persona)
-    print(f">>> id_persona={id_persona}, id_usuario={id_usuario}")
-    if not id_usuario:
-        return redirect('home')
     if request.method == 'POST':
         nombre = request.POST.get('nombre', '').strip()
         if nombre:
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SET NOCOUNT ON;
-                    INSERT INTO [usuarios].[Playlist] (nombrePlaylist, Usuario_idUsuario)
-                    VALUES (%s, %s);
-                    SELECT CONVERT(int, SCOPE_IDENTITY());
-                """, [nombre, id_usuario])
-                nueva_id = cursor.fetchone()[0]
-            return redirect('playlist_detail', playlist_id=nueva_id)
+            playlists_col = db["Playlists"]
+            resultado = playlists_col.insert_one({
+                "NombrePlaylist": nombre,
+                "IDUsuario": ObjectId(id_persona),
+                "Canciones": [],
+            })
+            return redirect('playlist_detail', playlist_id=str(resultado.inserted_id))
 
     return redirect('home')
 
@@ -935,73 +898,60 @@ def playlist_detail(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    id_usuario = _get_id_usuario(id_persona)
+    playlists_col = db["Playlists"]
+    canciones_col = db["Canciones"]
 
-    # Verificar que la playlist pertenece al usuario
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT idPlaylist, nombrePlaylist, Usuario_idUsuario
-            FROM [usuarios].[Playlist]
-            WHERE idPlaylist = %s
-        """, [playlist_id])
-        row = cursor.fetchone()
+    try:
+        playlist_doc = playlists_col.find_one({
+            "_id": ObjectId(playlist_id),
+            "IDUsuario": ObjectId(id_persona),
+        })
+    except Exception:
+        playlist_doc = None
 
-    if not row or row[2] != id_usuario:
+    if not playlist_doc:
         return redirect('home')
 
-    playlist = {'idPlaylist': row[0], 'nombre': row[1]}
+    playlist = {
+        'idPlaylist': str(playlist_doc["_id"]),
+        'nombre': playlist_doc.get("NombrePlaylist"),
+    }
 
-    # Canciones en la playlist
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT c.idCancion, c.nombre, c.duracion,
-                   p.nombre + ' ' + p.apellido AS artista,
-                   l.Nombre AS album, pc.orden
-            FROM [usuarios].[PlaylistCancion] pc
-            INNER JOIN [musica].[Cancion] c ON c.idCancion = pc.Cancion_idCancion
-            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            WHERE pc.Playlist_idPlaylist = %s
-            ORDER BY pc.orden
-        """, [playlist_id])
-        canciones = [
-            {
-                'idCancion': r[0],
-                'nombre': r[1],
-                'duracion': f"{r[2] // 60}:{r[2] % 60:02d}" if r[2] else '0:00',
-                'artista': r[3],
-                'album': r[4],
-                'orden': r[5],
-            }
-            for r in cursor.fetchall()
-        ]
+    # Canciones en la playlist, en orden
+    entradas = sorted(playlist_doc.get("Canciones", []), key=lambda e: e.get("Orden", 0))
+    ids_en_playlist = [e["IDCancion"] for e in entradas]
 
-    # Todas las canciones disponibles para agregar (que no estén ya)
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT c.idCancion, c.nombre,
-                   p.nombre + ' ' + p.apellido AS artista,
-                   l.Nombre AS album
-            FROM [musica].[Cancion] c
-            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            WHERE c.idCancion NOT IN (
-                SELECT Cancion_idCancion FROM [usuarios].[PlaylistCancion]
-                WHERE Playlist_idPlaylist = %s
-            )
-            ORDER BY c.nombre
-        """, [playlist_id])
-        canciones_disponibles = [
-            {
-                'idCancion': r[0],
-                'nombre': r[1],
-                'artista': r[2],
-                'album': r[3],
-            }
-            for r in cursor.fetchall()
-        ]
+    canciones_docs = {
+        c["_id"]: c
+        for c in canciones_col.find({"_id": {"$in": ids_en_playlist}})
+    }
+
+    canciones = []
+    for entrada in entradas:
+        c = canciones_docs.get(entrada["IDCancion"])
+        if not c:
+            continue
+        dur = c.get("Duracion") or 0
+        lanzamiento_info = c.get("Lanzamiento", {})
+        canciones.append({
+            'idCancion': str(c["_id"]),
+            'nombre': c.get("NombreCancion"),
+            'duracion': f"{int(dur) // 60}:{int(dur) % 60:02d}",
+            'artista': lanzamiento_info.get("Artista", {}).get("NombreArtistico", ""),
+            'album': lanzamiento_info.get("NombreLanzamiento", ""),
+            'orden': entrada.get("Orden"),
+        })
+
+    # Canciones disponibles para agregar (que no estén ya en la playlist)
+    canciones_disponibles = []
+    for c in canciones_col.find({"_id": {"$nin": ids_en_playlist}}).sort("NombreCancion", 1):
+        lanzamiento_info = c.get("Lanzamiento", {})
+        canciones_disponibles.append({
+            'idCancion': str(c["_id"]),
+            'nombre': c.get("NombreCancion"),
+            'artista': lanzamiento_info.get("Artista", {}).get("NombreArtistico", ""),
+            'album': lanzamiento_info.get("NombreLanzamiento", ""),
+        })
 
     return render(request, 'music/playlist_detail.html', {
         'playlist': playlist,
@@ -1015,27 +965,26 @@ def playlist_editar(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    id_usuario = _get_id_usuario(id_persona)
+    playlists_col = db["Playlists"]
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
-            [playlist_id]
-        )
-        row = cursor.fetchone()
+    try:
+        playlist_doc = playlists_col.find_one({
+            "_id": ObjectId(playlist_id),
+            "IDUsuario": ObjectId(id_persona),
+        })
+    except Exception:
+        playlist_doc = None
 
-    if not row or row[0] != id_usuario:
+    if not playlist_doc:
         return redirect('home')
 
     if request.method == 'POST':
         nombre = request.POST.get('nombre', '').strip()
         if nombre:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE [usuarios].[Playlist] SET nombrePlaylist = %s WHERE idPlaylist = %s",
-                    [nombre, playlist_id]
-                )
-        return redirect('playlist_detail', playlist_id=playlist_id)
+            playlists_col.update_one(
+                {"_id": ObjectId(playlist_id)},
+                {"$set": {"NombrePlaylist": nombre}},
+            )
 
     return redirect('playlist_detail', playlist_id=playlist_id)
 
@@ -1045,29 +994,21 @@ def playlist_eliminar(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    id_usuario = _get_id_usuario(id_persona)
+    playlists_col = db["Playlists"]
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
-            [playlist_id]
-        )
-        row = cursor.fetchone()
+    try:
+        playlist_doc = playlists_col.find_one({
+            "_id": ObjectId(playlist_id),
+            "IDUsuario": ObjectId(id_persona),
+        })
+    except Exception:
+        playlist_doc = None
 
-    if not row or row[0] != id_usuario:
+    if not playlist_doc:
         return redirect('home')
 
     if request.method == 'POST':
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "DELETE FROM [usuarios].[PlaylistCancion] WHERE Playlist_idPlaylist = %s",
-                    [playlist_id]
-                )
-                cursor.execute(
-                    "DELETE FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
-                    [playlist_id]
-                )
+        playlists_col.delete_one({"_id": ObjectId(playlist_id)})
         return redirect('home')
 
     return redirect('playlist_detail', playlist_id=playlist_id)
@@ -1078,43 +1019,33 @@ def playlist_agregar_cancion(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    id_usuario = _get_id_usuario(id_persona)
+    playlists_col = db["Playlists"]
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
-            [playlist_id]
-        )
-        row = cursor.fetchone()
+    try:
+        playlist_doc = playlists_col.find_one({
+            "_id": ObjectId(playlist_id),
+            "IDUsuario": ObjectId(id_persona),
+        })
+    except Exception:
+        playlist_doc = None
 
-    if not row or row[0] != id_usuario:
+    if not playlist_doc:
         return redirect('home')
 
     if request.method == 'POST':
         cancion_id = request.POST.get('cancion_id')
         if cancion_id:
-            with connection.cursor() as cursor:
-                # Calcular siguiente orden
-                cursor.execute("""
-                    SELECT ISNULL(MAX(orden), 0) + 1
-                    FROM [usuarios].[PlaylistCancion]
-                    WHERE Playlist_idPlaylist = %s
-                """, [playlist_id])
-                orden = cursor.fetchone()[0]
+            cancion_oid = ObjectId(cancion_id)
+            canciones_actuales = playlist_doc.get("Canciones", [])
 
-                # Evitar duplicados
-                cursor.execute("""
-                    SELECT COUNT(*) FROM [usuarios].[PlaylistCancion]
-                    WHERE Playlist_idPlaylist = %s AND Cancion_idCancion = %s
-                """, [playlist_id, cancion_id])
-                existe = cursor.fetchone()[0]
+            ya_existe = any(e["IDCancion"] == cancion_oid for e in canciones_actuales)
 
-                if not existe:
-                    cursor.execute("""
-                        INSERT INTO [usuarios].[PlaylistCancion]
-                            (Playlist_idPlaylist, Cancion_idCancion, orden)
-                        VALUES (%s, %s, %s)
-                    """, [playlist_id, cancion_id, orden])
+            if not ya_existe:
+                siguiente_orden = max([e.get("Orden", 0) for e in canciones_actuales], default=0) + 1
+                playlists_col.update_one(
+                    {"_id": ObjectId(playlist_id)},
+                    {"$push": {"Canciones": {"IDCancion": cancion_oid, "Orden": siguiente_orden}}},
+                )
 
     return redirect('playlist_detail', playlist_id=playlist_id)
 
@@ -1124,23 +1055,37 @@ def playlist_quitar_cancion(request, playlist_id, cancion_id):
     if not id_persona:
         return redirect('Login')
 
-    id_usuario = _get_id_usuario(id_persona)
+    playlists_col = db["Playlists"]
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT Usuario_idUsuario FROM [usuarios].[Playlist] WHERE idPlaylist = %s",
-            [playlist_id]
-        )
-        row = cursor.fetchone()
+    try:
+        playlist_doc = playlists_col.find_one({
+            "_id": ObjectId(playlist_id),
+            "IDUsuario": ObjectId(id_persona),
+        })
+    except Exception:
+        playlist_doc = None
 
-    if not row or row[0] != id_usuario:
+    if not playlist_doc:
         return redirect('home')
 
     if request.method == 'POST':
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                DELETE FROM [usuarios].[PlaylistCancion]
-                WHERE Playlist_idPlaylist = %s AND Cancion_idCancion = %s
-            """, [playlist_id, cancion_id])
+        playlists_col.update_one(
+            {"_id": ObjectId(playlist_id)},
+            {"$pull": {"Canciones": {"IDCancion": ObjectId(cancion_id)}}},
+        )
 
     return redirect('playlist_detail', playlist_id=playlist_id)
+def _get_usuario(id_persona):
+    if not id_persona:
+        return None
+    try:
+        return db["Usuarios"].find_one({"_id": ObjectId(id_persona)})
+    except Exception:
+        return None
+
+
+def _es_artista(usuario_doc):
+    if not usuario_doc:
+        return False
+    perfil = usuario_doc.get("PerfilArtista") or {}
+    return bool(perfil.get("NombreArtistico"))
