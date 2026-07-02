@@ -17,15 +17,14 @@ def _get_id_persona(request):
 
 
 def _get_artista_id(id_persona):
+    """En Mongo, el idArtista es el mismo _id del usuario si tiene PerfilArtista."""
     if not id_persona:
         return None
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT idArtista FROM [musica].[Artista] WHERE idPersona = %s",
-            [id_persona]
-        )
-        row = cursor.fetchone()
-    return row[0] if row else None
+    usuario = db["Usuarios"].find_one({"_id": ObjectId(id_persona)})
+    if not usuario:
+        return None
+    perfil = usuario.get("PerfilArtista") or {}
+    return id_persona if perfil.get("NombreArtistico") else None
 
 
 # ─── ARTISTAS ────────────────────────────────────────────────────────────────
@@ -35,33 +34,22 @@ def artistas_list(request):
     if not id_persona:
         return redirect('Login')
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT a.idArtista, p.nombre, p.apellido, d.nombreDiscografica,
-                   a.biografia, p.paisDeOrigen,
-                   (SELECT STRING_AGG(g.nombre, ', ')
-                    FROM [relaciones].[ArtistaGenero] ag
-                    INNER JOIN [musica].[Genero] g ON g.idGenero = ag.Genero_idGenero
-                    WHERE ag.Artista_idPersona = a.idPersona) AS generos
-            FROM [musica].[Artista] a
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            INNER JOIN [musica].[Discografica] d ON d.idDiscografica = a.Discografica_idDiscografica
-            ORDER BY p.nombre
-        """)
-        rows = cursor.fetchall()
+    artistas_docs = db["Usuarios"].find(
+        {"PerfilArtista.NombreArtistico": {"$nin": [None, ""]}}
+    ).sort("Nombre", 1)
 
-    artistas = [
-        {
-            'idArtista': r[0],
-            'nombre': r[1],
-            'apellido': r[2],
-            'discografica': r[3],
-            'biografia': r[4],
-            'pais': r[5],
-            'generos': r[6] or '',
-        }
-        for r in rows
-    ]
+    artistas = []
+    for u in artistas_docs:
+        perfil = u.get("PerfilArtista", {})
+        artistas.append({
+            'idArtista': str(u["_id"]),
+            'nombre': u.get("Nombre"),
+            'apellido': u.get("Apellido"),
+            'discografica': perfil.get("Discografica", ""),
+            'biografia': perfil.get("Biografia", ""),
+            'pais': u.get("PaisOrigen"),
+            'generos': ", ".join(perfil.get("Generos", [])),
+        })
 
     return render(request, 'music/artistas_list.html', {'artistas': artistas})
 
@@ -73,63 +61,45 @@ def artista_detail(request, artista_id):
 
     mi_artista_id = _get_artista_id(id_persona)
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT a.idArtista, a.idPersona, p.nombre, p.apellido,
-                   p.correo, p.paisDeOrigen, d.nombreDiscografica, a.biografia
-            FROM [musica].[Artista] a
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            INNER JOIN [musica].[Discografica] d ON d.idDiscografica = a.Discografica_idDiscografica
-            WHERE a.idArtista = %s
-        """, [artista_id])
-        row = cursor.fetchone()
+    try:
+        u = db["Usuarios"].find_one({"_id": ObjectId(artista_id)})
+    except Exception:
+        u = None
 
-    if not row:
+    if not u:
         return redirect('artistas')
 
+    perfil = u.get("PerfilArtista", {})
     artista = {
-        'idArtista': row[0],
-        'idPersona': row[1],
-        'nombre': row[2],
-        'apellido': row[3],
-        'correo': row[4],
-        'pais': row[5],
-        'discografica': row[6],
-        'biografia': row[7],
+        'idArtista': str(u["_id"]),
+        'idPersona': str(u["_id"]),
+        'nombre': u.get("Nombre"),
+        'apellido': u.get("Apellido"),
+        'correo': u.get("Correo"),
+        'pais': u.get("PaisOrigen"),
+        'discografica': perfil.get("Discografica", ""),
+        'biografia': perfil.get("Biografia", ""),
     }
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT g.idGenero, g.nombre
-            FROM [relaciones].[ArtistaGenero] ag
-            INNER JOIN [musica].[Genero] g ON g.idGenero = ag.Genero_idGenero
-            WHERE ag.Artista_idPersona = %s
-        """, [artista['idPersona']])
-        generos = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
+    generos = [{'id': g, 'nombre': g} for g in perfil.get("Generos", [])]
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT l.idLanzamiento, l.Nombre, l.FechaDePublicacion,
-                   l.tipoDeLanzamiento, g.nombre AS genero,
-                   COUNT(c.idCancion) AS num_canciones
-            FROM [musica].[Lanzamiento] l
-            INNER JOIN [musica].[Genero] g ON g.idGenero = l.Genero_idGenero
-            LEFT JOIN [musica].[Cancion] c ON c.Lanzamiento_idLanzamiento = l.idLanzamiento
-            WHERE l.idArtista = %s
-            GROUP BY l.idLanzamiento, l.Nombre, l.FechaDePublicacion, l.tipoDeLanzamiento, g.nombre
-            ORDER BY l.FechaDePublicacion DESC
-        """, [artista_id])
-        lanzamientos = [
-            {
-                'idLanzamiento': r[0],
-                'nombre': r[1],
-                'fecha': r[2],
-                'tipo': r[3],
-                'genero': r[4],
-                'num_canciones': r[5],
-            }
-            for r in cursor.fetchall()
-        ]
+    lanzamientos_docs = db["Lanzamientos"].find(
+        {"IDArtista": ObjectId(artista_id)}
+    ).sort("FechaPublicacion", -1)
+
+    lanzamientos = []
+    for l in lanzamientos_docs:
+        num_canciones = db["Canciones"].count_documents(
+            {"Lanzamiento.idLanzamiento": l["_id"]}
+        )
+        lanzamientos.append({
+            'idLanzamiento': str(l["_id"]),
+            'nombre': l.get("NombreLanzamiento"),
+            'fecha': l.get("FechaPublicacion"),
+            'tipo': l.get("TipoLanzamiento"),
+            'genero': l.get("Genero", ""),
+            'num_canciones': num_canciones,
+        })
 
     es_propio = (mi_artista_id == artista_id)
 
@@ -150,40 +120,31 @@ def artista_editar(request, artista_id):
     if mi_artista_id != artista_id:
         return redirect('artista_detail', artista_id=artista_id)
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT idDiscografica, nombreDiscografica FROM [musica].[Discografica] ORDER BY nombreDiscografica"
-        )
-        discograficas = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
+    discograficas_raw = db["Usuarios"].distinct("PerfilArtista.Discografica")
+    discograficas = [{'id': d, 'nombre': d} for d in discograficas_raw if d]
+
+    u = db["Usuarios"].find_one({"_id": ObjectId(artista_id)})
+    perfil = u.get("PerfilArtista", {}) if u else {}
 
     if request.method == 'POST':
         biografia = request.POST.get('biografia', '').strip()
-        id_discografica = request.POST.get('discografica')
+        discografica = request.POST.get('discografica', '').strip()
 
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "EXEC [musica].[sp_ActualizarArtista] @idArtista = %s, @idDiscografica = %s, @biografia = %s",
-                [artista_id, id_discografica, biografia]
-            )
+        db["Usuarios"].update_one(
+            {"_id": ObjectId(artista_id)},
+            {"$set": {
+                "PerfilArtista.Biografia": biografia,
+                "PerfilArtista.Discografica": discografica,
+            }},
+        )
         return redirect('artista_detail', artista_id=artista_id)
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT a.idArtista, a.idPersona, p.nombre, p.apellido,
-                   p.correo, p.paisDeOrigen, d.nombreDiscografica, a.biografia
-            FROM [musica].[Artista] a
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            INNER JOIN [musica].[Discografica] d ON d.idDiscografica = a.Discografica_idDiscografica
-            WHERE a.idArtista = %s
-        """, [artista_id])
-        row = cursor.fetchone()
-
     artista = {
-        'idArtista': row[0],
-        'nombre': row[2],
-        'apellido': row[3],
-        'discografica': row[6],
-        'biografia': row[7],
+        'idArtista': artista_id,
+        'nombre': u.get("Nombre") if u else "",
+        'apellido': u.get("Apellido") if u else "",
+        'discografica': perfil.get("Discografica", ""),
+        'biografia': perfil.get("Biografia", ""),
     }
 
     return render(request, 'music/artista_editar.html', {
@@ -192,55 +153,137 @@ def artista_editar(request, artista_id):
     })
 
 
+
 # ─── LANZAMIENTOS ─────────────────────────────────────────────────────────────
 def lanzamiento_detail(request, lanzamiento_id):
     id_persona = _get_id_persona(request)
     if not id_persona:
         return redirect('Login')
 
-    try:
-        lanzamiento_doc = db["Lanzamientos"].find_one({"_id": ObjectId(lanzamiento_id)})
-    except Exception:
-        lanzamiento_doc = None
+    mi_artista_id = _get_artista_id(id_persona)
 
-    if not lanzamiento_doc:
+    try:
+        l = db["Lanzamientos"].find_one({"_id": ObjectId(lanzamiento_id)})
+    except Exception:
+        l = None
+
+    if not l:
         return redirect('artistas')
 
-    artista_doc = db["Usuarios"].find_one({"_id": lanzamiento_doc["IDArtista"]})
+    artista_doc = db["Usuarios"].find_one({"_id": l["IDArtista"]})
     perfil = artista_doc.get("PerfilArtista", {}) if artista_doc else {}
+    nombre_artista = (
+        f"{artista_doc.get('Nombre','')} {artista_doc.get('Apellido','')}".strip()
+        if artista_doc else perfil.get("NombreArtistico", "")
+    )
 
     lanzamiento = {
-        'idLanzamiento': str(lanzamiento_doc["_id"]),
-        'nombre': lanzamiento_doc.get("NombreLanzamiento"),
-        'fecha': lanzamiento_doc.get("FechaPublicacion"),
-        'tipo': lanzamiento_doc.get("TipoLanzamiento"),
-        'portada': lanzamiento_doc.get("URLPortadaLanzamiento"),
-        'genero': lanzamiento_doc.get("Genero"),
-        'artista': perfil.get("NombreArtistico", ""),
-        'idArtista': str(lanzamiento_doc["IDArtista"]),
+        'idLanzamiento': str(l["_id"]),
+        'nombre': l.get("NombreLanzamiento"),
+        'fecha': l.get("FechaPublicacion"),
+        'tipo': l.get("TipoLanzamiento"),
+        'portada': l.get("URLPortadaLanzamiento", ""),
+        'genero': l.get("Genero", ""),
+        'artista': nombre_artista,
+        'idArtista': str(l["IDArtista"]),
     }
 
+    canciones_docs = db["Canciones"].find(
+        {"Lanzamiento.idLanzamiento": l["_id"]}
+    ).sort("NumeroPista", 1)
+
     canciones = []
-    for c in db["Canciones"].find(
-        {"Lanzamiento.idLanzamiento": lanzamiento_doc["_id"]}
-    ).sort("NumeroPista", 1):
+    for c in canciones_docs:
         dur = c.get("Duracion") or 0
         canciones.append({
             'idCancion': str(c["_id"]),
             'nombre': c.get("NombreCancion"),
-            'duracion': f"{int(dur) // 60}:{int(dur) % 60:02d}",
+            'duracion': f"{int(dur)//60}:{int(dur)%60:02d}",
             'pista': c.get("NumeroPista"),
             'reproducciones': c.get("Reproducciones", 0),
         })
 
-    es_propio = (str(lanzamiento_doc["IDArtista"]) == str(id_persona))
+    es_propio = (mi_artista_id == lanzamiento['idArtista'])
 
     return render(request, 'music/lanzamiento_detail.html', {
         'lanzamiento': lanzamiento,
         'canciones': canciones,
         'es_propio': es_propio,
     })
-    
+
+
+def lanzamiento_editar(request, lanzamiento_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    mi_artista_id = _get_artista_id(id_persona)
+
+    try:
+        l = db["Lanzamientos"].find_one({"_id": ObjectId(lanzamiento_id)})
+    except Exception:
+        l = None
+
+    if not l or str(l["IDArtista"]) != mi_artista_id:
+        return redirect('artistas')
+
+    if request.method == 'POST':
+        nombre = request.POST.get('nombre', '').strip()
+        fecha = request.POST.get('fecha')
+        tipo = request.POST.get('tipo')
+        genero = request.POST.get('genero', '').strip()
+
+        db["Lanzamientos"].update_one(
+            {"_id": ObjectId(lanzamiento_id)},
+            {"$set": {
+                "NombreLanzamiento": nombre,
+                "FechaPublicacion": fecha,
+                "TipoLanzamiento": tipo,
+                "Genero": genero,
+            }},
+        )
+        return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
+
+    lanzamiento = {
+        'idLanzamiento': str(l["_id"]),
+        'nombre': l.get("NombreLanzamiento"),
+        'fecha': l.get("FechaPublicacion"),
+        'tipo': l.get("TipoLanzamiento"),
+        'genero_id': l.get("Genero", ""),
+    }
+
+    generos_raw = db["Lanzamientos"].distinct("Genero")
+    generos = [{'id': g, 'nombre': g} for g in generos_raw if g]
+
+    return render(request, 'music/lanzamiento_form.html', {
+        'lanzamiento': lanzamiento,
+        'generos': generos,
+        'accion': 'Editar',
+    })
+
+
+def lanzamiento_eliminar(request, lanzamiento_id):
+    id_persona = _get_id_persona(request)
+    if not id_persona:
+        return redirect('Login')
+
+    mi_artista_id = _get_artista_id(id_persona)
+
+    try:
+        l = db["Lanzamientos"].find_one({"_id": ObjectId(lanzamiento_id)})
+    except Exception:
+        l = None
+
+    if not l or str(l["IDArtista"]) != mi_artista_id:
+        return redirect('artistas')
+
+    if request.method == 'POST':
+        db["Canciones"].delete_many({"Lanzamiento.idLanzamiento": ObjectId(lanzamiento_id)})
+        db["Lanzamientos"].delete_one({"_id": ObjectId(lanzamiento_id)})
+        return redirect('artista_detail', artista_id=mi_artista_id)
+
+    return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
+
 def lanzamiento_crear(request):
     id_persona = _get_id_persona(request)
     if not id_persona:
@@ -397,100 +440,6 @@ def lanzamiento_crear(request):
         'error_cancion': error_cancion,
     })
 
-def lanzamiento_editar(request, lanzamiento_id):
-    id_persona = _get_id_persona(request)
-    if not id_persona:
-        return redirect('Login')
-
-    mi_artista_id = _get_artista_id(id_persona)
-
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT idLanzamiento, Nombre, FechaDePublicacion,
-                   tipoDeLanzamiento, Genero_idGenero, idArtista
-            FROM [musica].[Lanzamiento]
-            WHERE idLanzamiento = %s
-        """, [lanzamiento_id])
-        row = cursor.fetchone()
-
-    if not row or row[5] != mi_artista_id:
-        return redirect('artistas')
-
-    lanzamiento = {
-        'idLanzamiento': row[0],
-        'nombre': row[1],
-        'fecha': row[2].strftime('%Y-%m-%d') if row[2] else '',
-        'tipo': row[3],
-        'genero_id': row[4],
-    }
-
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT idGenero, nombre FROM [musica].[Genero] ORDER BY nombre")
-        generos = [{'id': r[0], 'nombre': r[1]} for r in cursor.fetchall()]
-
-    if request.method == 'POST':
-        nombre = request.POST.get('nombre', '').strip()
-        fecha = request.POST.get('fecha')
-        tipo = request.POST.get('tipo')
-        genero_id = request.POST.get('genero')
-
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                UPDATE [musica].[Lanzamiento]
-                SET Nombre = %s, FechaDePublicacion = %s,
-                    tipoDeLanzamiento = %s, Genero_idGenero = %s
-                WHERE idLanzamiento = %s
-            """, [nombre, fecha, tipo, genero_id, lanzamiento_id])
-
-        return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
-
-    return render(request, 'music/lanzamiento_form.html', {
-        'lanzamiento': lanzamiento,
-        'generos': generos,
-        'accion': 'Editar',
-    })
-
-
-def lanzamiento_eliminar(request, lanzamiento_id):
-    id_persona = _get_id_persona(request)
-    if not id_persona:
-        return redirect('Login')
-
-    mi_artista_id = _get_artista_id(id_persona)
-
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT idArtista FROM [musica].[Lanzamiento] WHERE idLanzamiento = %s",
-            [lanzamiento_id]
-        )
-        row = cursor.fetchone()
-
-    if not row or row[0] != mi_artista_id:
-        return redirect('artistas')
-
-    if request.method == 'POST':
-        with transaction.atomic():
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    DELETE FROM [pagos].[Regalias]
-                    WHERE Cancion_idCancion IN (
-                        SELECT idCancion FROM [musica].[Cancion]
-                        WHERE Lanzamiento_idLanzamiento = %s
-                    )
-                """, [lanzamiento_id])
-                cursor.execute("""
-                    DELETE FROM [musica].[Cancion]
-                    WHERE Lanzamiento_idLanzamiento = %s
-                """, [lanzamiento_id])
-                cursor.execute(
-                    "DELETE FROM [musica].[Lanzamiento] WHERE idLanzamiento = %s",
-                    [lanzamiento_id]
-                )
-        return redirect('artista_detail', artista_id=mi_artista_id)
-
-    return redirect('lanzamiento_detail', lanzamiento_id=lanzamiento_id)
-
-
 # ─── CANCIONES ────────────────────────────────────────────────────────────────
 
 def canciones_buscar(request):
@@ -556,26 +505,26 @@ def generos_list(request):
     if not id_persona:
         return redirect('Login')
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT g.idGenero, g.nombre,
-                   COUNT(DISTINCT l.idLanzamiento) AS num_lanzamientos,
-                   COUNT(c.idCancion) AS num_canciones
-            FROM [musica].[Genero] g
-            LEFT JOIN [musica].[Lanzamiento] l ON l.Genero_idGenero = g.idGenero
-            LEFT JOIN [musica].[Cancion] c ON c.Lanzamiento_idLanzamiento = l.idLanzamiento
-            GROUP BY g.idGenero, g.nombre
-            ORDER BY num_canciones DESC
-        """)
-        generos = [
-            {
-                'idGenero': r[0],
-                'nombre': r[1],
-                'num_lanzamientos': r[2],
-                'num_canciones': r[3],
-            }
-            for r in cursor.fetchall()
+    generos_raw = db["Lanzamientos"].distinct("Genero")
+
+    generos = []
+    for nombre_genero in generos_raw:
+        if not nombre_genero:
+            continue
+        lanzamiento_ids = [
+            l["_id"] for l in db["Lanzamientos"].find({"Genero": nombre_genero}, {"_id": 1})
         ]
+        num_canciones = db["Canciones"].count_documents(
+            {"Lanzamiento.idLanzamiento": {"$in": lanzamiento_ids}}
+        )
+        generos.append({
+            'idGenero': nombre_genero,
+            'nombre': nombre_genero,
+            'num_lanzamientos': len(lanzamiento_ids),
+            'num_canciones': num_canciones,
+        })
+
+    generos.sort(key=lambda g: g['num_canciones'], reverse=True)
 
     return render(request, 'music/generos_list.html', {'generos': generos})
 
@@ -585,42 +534,30 @@ def genero_detail(request, genero_id):
     if not id_persona:
         return redirect('Login')
 
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT idGenero, nombre FROM [musica].[Genero] WHERE idGenero = %s",
-            [genero_id]
-        )
-        row = cursor.fetchone()
+    genero = {'idGenero': genero_id, 'nombre': genero_id}
 
-    if not row:
-        return redirect('generos')
+    lanzamiento_ids = [
+        l["_id"] for l in db["Lanzamientos"].find({"Genero": genero_id}, {"_id": 1})
+    ]
 
-    genero = {'idGenero': row[0], 'nombre': row[1]}
+    canciones_docs = db["Canciones"].find(
+        {"Lanzamiento.idLanzamiento": {"$in": lanzamiento_ids}}
+    ).sort("Reproducciones", -1)
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
-                   l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
-                   l.idLanzamiento
-            FROM [musica].[Cancion] c
-            INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            WHERE l.Genero_idGenero = %s
-            ORDER BY c.reproducciones DESC
-        """, [genero_id])
-        canciones = [
-            {
-                'idCancion': r[0],
-                'nombre': r[1],
-                'duracion': f"{r[2] // 60}:{r[2] % 60:02d}",
-                'reproducciones': r[3] or 0,
-                'album': r[4],
-                'artista': r[5],
-                'idLanzamiento': r[6],
-            }
-            for r in cursor.fetchall()
-        ]
+    canciones = []
+    for c in canciones_docs:
+        dur = c.get("Duracion") or 0
+        li = c.get("Lanzamiento", {})
+        id_lanz_raw = li.get("idLanzamiento")
+        canciones.append({
+            'idCancion': str(c["_id"]),
+            'nombre': c.get("NombreCancion"),
+            'duracion': f"{int(dur)//60}:{int(dur)%60:02d}",
+            'reproducciones': c.get("Reproducciones", 0),
+            'album': li.get("NombreLanzamiento", ""),
+            'artista': li.get("Artista", {}).get("NombreArtistico", ""),
+            'idLanzamiento': str(id_lanz_raw) if id_lanz_raw else None,
+        })
 
     return render(request, 'music/genero_detail.html', {
         'genero': genero,
@@ -635,37 +572,31 @@ def discograficas_list(request):
     if not id_persona:
         return redirect('Login')
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT d.idDiscografica, d.nombreDiscografica,
-                   COUNT(DISTINCT a.idArtista) AS num_artistas
-            FROM [musica].[Discografica] d
-            LEFT JOIN [musica].[Artista] a ON a.Discografica_idDiscografica = d.idDiscografica
-            GROUP BY d.idDiscografica, d.nombreDiscografica
-            ORDER BY num_artistas DESC
-        """)
-        discograficas_rows = cursor.fetchall()
+    artistas_docs = list(db["Usuarios"].find(
+        {"PerfilArtista.NombreArtistico": {"$nin": [None, ""]}}
+    ))
+
+    agrupado = {}
+    for u in artistas_docs:
+        perfil = u.get("PerfilArtista", {})
+        disco = (perfil.get("Discografica") or "").strip() or "Independiente"
+        agrupado.setdefault(disco, []).append({
+            'idArtista': str(u["_id"]),
+            'nombre': u.get("Nombre"),
+            'apellido': u.get("Apellido"),
+        })
 
     discograficas = []
-    for row in discograficas_rows:
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT a.idArtista, p.nombre, p.apellido
-                FROM [musica].[Artista] a
-                INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-                WHERE a.Discografica_idDiscografica = %s
-                ORDER BY p.nombre
-            """, [row[0]])
-            artistas = [
-                {'idArtista': r[0], 'nombre': r[1], 'apellido': r[2]}
-                for r in cursor.fetchall()
-            ]
+    for nombre_disco, artistas in agrupado.items():
+        artistas.sort(key=lambda a: a['nombre'] or "")
         discograficas.append({
-            'idDiscografica': row[0],
-            'nombre': row[1],
-            'num_artistas': row[2],
+            'idDiscografica': nombre_disco,
+            'nombre': nombre_disco,
+            'num_artistas': len(artistas),
             'artistas': artistas,
         })
+
+    discograficas.sort(key=lambda d: d['num_artistas'], reverse=True)
 
     return render(request, 'music/discograficas_list.html', {'discograficas': discograficas})
 

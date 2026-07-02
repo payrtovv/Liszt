@@ -3,17 +3,18 @@ from . import views
 
 urlpatterns = [
     path('artistas/', views.artistas_list, name='artistas'),
-    path('artistas/<int:artista_id>/', views.artista_detail, name='artista_detail'),
-    path('artistas/<int:artista_id>/editar/', views.artista_editar, name='artista_editar'),
+    path('artistas/<str:artista_id>/', views.artista_detail, name='artista_detail'),
+    path('artistas/<str:artista_id>/editar/', views.artista_editar, name='artista_editar'),
     path('lanzamientos/crear/', views.lanzamiento_crear, name='lanzamiento_crear'),
     path('lanzamientos/<str:lanzamiento_id>/', views.lanzamiento_detail, name='lanzamiento_detail'),
+    path('lanzamientos/<str:lanzamiento_id>/editar/', views.lanzamiento_editar, name='lanzamiento_editar'),
     path('lanzamientos/<str:lanzamiento_id>/eliminar/', views.lanzamiento_eliminar, name='lanzamiento_eliminar'),
     path('lanzamientos/<str:lanzamiento_id>/canciones/agregar/', views.cancion_crear, name='cancion_crear'),
     path('canciones/', views.canciones_buscar, name='canciones'),
     path('canciones/<str:cancion_id>/eliminar/', views.cancion_eliminar, name='cancion_eliminar'),
     path('canciones/<str:cancion_id>/stream/', views.stream_cancion, name='stream_cancion'),
     path('generos/', views.generos_list, name='generos'),
-    path('generos/<int:genero_id>/', views.genero_detail, name='genero_detail'),
+    path('generos/<str:genero_id>/', views.genero_detail, name='genero_detail'),
     path('discograficas/', views.discograficas_list, name='discograficas'),
     path('home', views.Home, name='home'),
     # Playlists
