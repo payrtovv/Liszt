@@ -83,7 +83,7 @@
 
       <!-- Playlists -->
       <div style="padding: 4px 0; border-bottom: 1px solid #1a1a1a;">
-        {% for pl in sidebar_playlists %}
+        {% for pl in sidebar_playlist %}
         <a href="{% url 'playlist_detail' playlist_id=pl.id %}"
            style="display:flex; align-items:center; gap:8px; padding:7px 14px;
                   color:#aaa; text-decoration:none; font-size:13px; border-radius:6px; margin:1px 6px;"

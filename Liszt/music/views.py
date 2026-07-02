@@ -6,6 +6,11 @@ from django.shortcuts import render, redirect
 from django.shortcuts import render, redirect
 from bson import ObjectId
 from Liszt.mongodb import db
+from datetime import datetime
+
+GENEROS_DISPONIBLES = [
+    "Alternative rock", "Pop", "Jazz", "Trap latino", "Reggaetón", "Soul", "Electrónica", "Metal", "Dance pop", "House"
+]
 
 def _get_id_persona(request):
     return request.session.get('idPersona')
@@ -188,68 +193,54 @@ def artista_editar(request, artista_id):
 
 
 # ─── LANZAMIENTOS ─────────────────────────────────────────────────────────────
-
 def lanzamiento_detail(request, lanzamiento_id):
     id_persona = _get_id_persona(request)
     if not id_persona:
         return redirect('Login')
 
-    mi_artista_id = _get_artista_id(id_persona)
+    try:
+        lanzamiento_doc = db["Lanzamientos"].find_one({"_id": ObjectId(lanzamiento_id)})
+    except Exception:
+        lanzamiento_doc = None
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT l.idLanzamiento, l.Nombre, l.FechaDePublicacion, l.tipoDeLanzamiento,
-                   l.urlPortadaLanzamiento, g.nombre AS genero,
-                   p.nombre + ' ' + p.apellido AS artista, l.idArtista
-            FROM [musica].[Lanzamiento] l
-            INNER JOIN [musica].[Genero] g ON g.idGenero = l.Genero_idGenero
-            INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-            INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-            WHERE l.idLanzamiento = %s
-        """, [lanzamiento_id])
-        row = cursor.fetchone()
-
-    if not row:
+    if not lanzamiento_doc:
         return redirect('artistas')
 
+    artista_doc = db["Usuarios"].find_one({"_id": lanzamiento_doc["IDArtista"]})
+    perfil = artista_doc.get("PerfilArtista", {}) if artista_doc else {}
+
     lanzamiento = {
-        'idLanzamiento': row[0],
-        'nombre': row[1],
-        'fecha': row[2],
-        'tipo': row[3],
-        'portada': row[4],
-        'genero': row[5],
-        'artista': row[6],
-        'idArtista': row[7],
+        'idLanzamiento': str(lanzamiento_doc["_id"]),
+        'nombre': lanzamiento_doc.get("NombreLanzamiento"),
+        'fecha': lanzamiento_doc.get("FechaPublicacion"),
+        'tipo': lanzamiento_doc.get("TipoLanzamiento"),
+        'portada': lanzamiento_doc.get("URLPortadaLanzamiento"),
+        'genero': lanzamiento_doc.get("Genero"),
+        'artista': perfil.get("NombreArtistico", ""),
+        'idArtista': str(lanzamiento_doc["IDArtista"]),
     }
 
-    with connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT idCancion, nombre, [duración], NumeroDePista, reproducciones
-            FROM [musica].[Cancion]
-            WHERE Lanzamiento_idLanzamiento = %s
-            ORDER BY NumeroDePista
-        """, [lanzamiento_id])
-        canciones = [
-            {
-                'idCancion': r[0],
-                'nombre': r[1],
-                'duracion': f"{r[2] // 60}:{r[2] % 60:02d}",
-                'pista': r[3],
-                'reproducciones': r[4] or 0,
-            }
-            for r in cursor.fetchall()
-        ]
+    canciones = []
+    for c in db["Canciones"].find(
+        {"Lanzamiento.idLanzamiento": lanzamiento_doc["_id"]}
+    ).sort("NumeroPista", 1):
+        dur = c.get("Duracion") or 0
+        canciones.append({
+            'idCancion': str(c["_id"]),
+            'nombre': c.get("NombreCancion"),
+            'duracion': f"{int(dur) // 60}:{int(dur) % 60:02d}",
+            'pista': c.get("NumeroPista"),
+            'reproducciones': c.get("Reproducciones", 0),
+        })
 
-    es_propio = (mi_artista_id == lanzamiento['idArtista'])
+    es_propio = (str(lanzamiento_doc["IDArtista"]) == str(id_persona))
 
     return render(request, 'music/lanzamiento_detail.html', {
         'lanzamiento': lanzamiento,
         'canciones': canciones,
         'es_propio': es_propio,
     })
-
-
+    
 def lanzamiento_crear(request):
     id_persona = _get_id_persona(request)
     if not id_persona:
@@ -257,7 +248,6 @@ def lanzamiento_crear(request):
 
     usuario_doc = _get_usuario(id_persona)
     if not usuario_doc or not _es_artista(usuario_doc):
-        # No tiene perfil de artista -> no puede crear lanzamientos
         return redirect('home')
 
     perfil_artista = usuario_doc.get("PerfilArtista", {})
@@ -285,6 +275,7 @@ def lanzamiento_crear(request):
                 'nombre': lanzamiento_doc.get("NombreLanzamiento"),
                 'tipo': lanzamiento_doc.get("TipoLanzamiento"),
                 'fecha': lanzamiento_doc.get("FechaPublicacion"),
+                'genero_nombre': lanzamiento_doc.get("Genero"),
             }
 
             for c in canciones_col.find(
@@ -304,24 +295,38 @@ def lanzamiento_crear(request):
         # ── Paso 1: crear lanzamiento ──
         if accion == 'crear_lanzamiento':
             nombre = request.POST.get('nombre', '').strip()
-            fecha = request.POST.get('fecha')
+            fecha_str = request.POST.get('fecha')
             tipo = request.POST.get('tipo')
+            genero = request.POST.get('genero', '').strip()
 
-            if not all([nombre, fecha, tipo]):
+            if not all([nombre, fecha_str, tipo, genero]):
                 error = 'Todos los campos son obligatorios.'
             else:
+                try:
+                    fecha = datetime.strptime(fecha_str, '%Y-%m-%d')
+                except ValueError:
+                    error = 'Fecha inválida.'
+                    return render(request, 'music/lanzamiento_form.html', {
+                        'generos': GENEROS_DISPONIBLES,
+                        'lanzamiento_creado': lanzamiento_creado,
+                        'canciones_subidas': canciones_subidas,
+                        'error': error,
+                        'error_cancion': error_cancion,
+                    })
+
                 nuevo_doc = {
                     "IDArtista": ObjectId(id_persona),
                     "NombreLanzamiento": nombre,
                     "FechaPublicacion": fecha,
                     "TipoLanzamiento": tipo,
                     "URLPortadaLanzamiento": "",
+                    "Genero": request.POST.get('genero', ''),
                 }
                 resultado = lanzamientos_col.insert_one(nuevo_doc)
                 request.session['lanzamiento_en_curso'] = str(resultado.inserted_id)
                 request.session.modified = True
                 return redirect('lanzamiento_crear')
-
+        
         # ── Paso 2: subir canción ──
         elif accion == 'subir_cancion' and lanzamiento_id_sesion:
             nombre_cancion = request.POST.get('nombre', '').strip()
@@ -385,6 +390,7 @@ def lanzamiento_crear(request):
                     return redirect('lanzamiento_crear')
 
     return render(request, 'music/lanzamiento_form.html', {
+        'generos': GENEROS_DISPONIBLES,
         'lanzamiento_creado': lanzamiento_creado,
         'canciones_subidas': canciones_subidas,
         'error': error,
@@ -497,81 +503,44 @@ def canciones_buscar(request):
     canciones = []
 
     if q:
-        param = f'%{q}%'
+        canciones_col = db["Canciones"]
+        regex = {"$regex": q, "$options": "i"}
 
         if filtro == 'nombre':
-            sql = """
-                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
-                       l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
-                       l.idLanzamiento, l.idArtista
-                FROM [musica].[Cancion] c
-                INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-                INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-                INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-                WHERE c.nombre LIKE %s
-                ORDER BY c.reproducciones DESC
-            """
-            params = [param]
-
-        elif filtro == 'genero':
-            sql = """
-                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
-                       l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
-                       l.idLanzamiento, l.idArtista
-                FROM [musica].[Cancion] c
-                INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-                INNER JOIN [musica].[Genero] g ON g.idGenero = l.Genero_idGenero
-                INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-                INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-                WHERE g.nombre LIKE %s
-                ORDER BY c.reproducciones DESC
-            """
-            params = [param]
+            query = {"NombreCancion": regex}
+            sort_field = [("Reproducciones", -1)]
 
         elif filtro == 'artista':
-            sql = """
-                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
-                       l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
-                       l.idLanzamiento, l.idArtista
-                FROM [musica].[Cancion] c
-                INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-                INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-                INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-                WHERE p.nombre LIKE %s OR p.apellido LIKE %s
-                ORDER BY c.reproducciones DESC
-            """
-            params = [param, param]
+            query = {"Lanzamiento.Artista.NombreArtistico": regex}
+            sort_field = [("Reproducciones", -1)]
 
-        else:  # album
-            sql = """
-                SELECT c.idCancion, c.nombre, c.[duración], c.reproducciones,
-                       l.Nombre AS album, p.nombre + ' ' + p.apellido AS artista,
-                       l.idLanzamiento, l.idArtista
-                FROM [musica].[Cancion] c
-                INNER JOIN [musica].[Lanzamiento] l ON l.idLanzamiento = c.Lanzamiento_idLanzamiento
-                INNER JOIN [musica].[Artista] a ON a.idArtista = l.idArtista
-                INNER JOIN [usuarios].[Persona] p ON p.idPersona = a.idPersona
-                WHERE l.Nombre LIKE %s
-                ORDER BY c.NumeroDePista
-            """
-            params = [param]
+        elif filtro == 'album':
+            query = {"Lanzamiento.NombreLanzamiento": regex}
+            sort_field = [("NumeroPista", 1)]
 
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            rows = cursor.fetchall()
+        elif filtro == 'genero':
+            # El documento de Lanzamiento aún no guarda género.
+            # Placeholder: no devuelve resultados hasta agregar ese campo.
+            query = {"_id": None}
+            sort_field = [("Reproducciones", -1)]
 
-        canciones = [
-            {
-                'idCancion': r[0],
-                'nombre': r[1],
-                'duracion': f"{r[2] // 60}:{r[2] % 60:02d}",
-                'reproducciones': r[3] or 0,
-                'album': r[4],
-                'artista': r[5],
-                'idLanzamiento': r[6],
-            }
-            for r in rows
-        ]
+        else:
+            query = {"NombreCancion": regex}
+            sort_field = [("Reproducciones", -1)]
+
+        for c in canciones_col.find(query).sort(sort_field):
+            dur = c.get("Duracion") or 0
+            lanzamiento_info = c.get("Lanzamiento", {})
+            id_lanzamiento_raw = lanzamiento_info.get("idLanzamiento")
+            canciones.append({
+                'idCancion': str(c["_id"]),
+                'nombre': c.get("NombreCancion"),
+                'duracion': f"{int(dur) // 60}:{int(dur) % 60:02d}",
+                'reproducciones': c.get("Reproducciones", 0),
+                'album': lanzamiento_info.get("NombreLanzamiento", ""),
+                'artista': lanzamiento_info.get("Artista", {}).get("NombreArtistico", ""),
+                'idLanzamiento': str(id_lanzamiento_raw) if id_lanzamiento_raw else None,
+            })
 
     return render(request, 'music/canciones_buscar.html', {
         'canciones': canciones,
@@ -730,19 +699,16 @@ def Home(request):
     })
 
 def stream_cancion(request, cancion_id):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT url_audio FROM [musica].[Cancion] WHERE idCancion = %s",
-            [cancion_id]
-        )
-        row = cursor.fetchone()
+    try:
+        cancion_doc = db["Canciones"].find_one({"_id": ObjectId(cancion_id)})
+    except Exception:
+        cancion_doc = None
 
-    if not row or not row[0]:
+    if not cancion_doc or not cancion_doc.get("URLAudio"):
         raise Http404
 
-    url_audio = row[0]
+    url_audio = cancion_doc["URLAudio"]
 
-    # Si es una URL local /media/... la servimos como FileResponse
     if url_audio.startswith('/media/'):
         ruta = os.path.join(settings.BASE_DIR, url_audio.lstrip('/'))
         if not os.path.exists(ruta):
@@ -758,83 +724,11 @@ def stream_cancion(request, cancion_id):
         content_type = content_types.get(ext, 'audio/mpeg')
         return FileResponse(open(ruta, 'rb'), content_type=content_type)
 
-    # Si es URL externa, redirigir
     from django.http import HttpResponseRedirect
-    return HttpResponseRedirect(row[0])
     return HttpResponseRedirect(url_audio)
 
 def cancion_crear(request, lanzamiento_id):
-    id_persona = _get_id_persona(request)
-    if not id_persona:
-        return redirect('Login')
-
-    mi_artista_id = _get_artista_id(id_persona)
-    if not mi_artista_id:
-        return redirect('artistas')
-
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT idArtista FROM [musica].[Lanzamiento] WHERE idLanzamiento = %s",
-            [lanzamiento_id]
-        )
-        row = cursor.fetchone()
-
-    if not row or row[0] != mi_artista_id:
-        return redirect('artistas')
-
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT ISNULL(MAX(NumeroDePista), 0) + 1 FROM [musica].[Cancion] WHERE Lanzamiento_idLanzamiento = %s",
-            [lanzamiento_id]
-        )
-        siguiente_pista = cursor.fetchone()[0]
-
-    if request.method == 'POST':
-        nombre = request.POST.get('nombre', '').strip()
-        archivo = request.FILES.get('audio')
-
-        if not nombre or not archivo:
-            request.session['error_cancion'] = 'El nombre y el archivo son obligatorios.'
-            return redirect('lanzamiento_crear')
-
-        ext = os.path.splitext(archivo.name)[1].lower()
-        if ext not in ['.mp3', '.wav', '.ogg', '.flac', '.m4a']:
-            request.session['error_cancion'] = 'Formato no permitido.'
-            return redirect('lanzamiento_crear')
-
-        carpeta = os.path.join(settings.MEDIA_ROOT, 'canciones', str(lanzamiento_id))
-        os.makedirs(carpeta, exist_ok=True)
-
-        nombre_archivo = f"pista_{siguiente_pista}_{nombre.replace(' ', '_')}{ext}"
-        ruta_completa = os.path.join(carpeta, nombre_archivo)
-
-        with open(ruta_completa, 'wb+') as destino:
-            for chunk in archivo.chunks():
-                destino.write(chunk)
-
-        url_audio = f"/media/canciones/{lanzamiento_id}/{nombre_archivo}"
-
-        duracion = 0
-        try:
-            from mutagen import File as MutagenFile
-            audio_info = MutagenFile(ruta_completa)
-            if audio_info and audio_info.info:
-                duracion = int(audio_info.info.length)
-        except Exception:
-            pass
-
-        with connection.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO [musica].[Cancion]
-                    (nombre, duracion, Lanzamiento_idLanzamiento,
-                     NumeroDePista, url_audio, reproducciones)
-                VALUES (%s, %s, %s, %s, %s, 0)
-            """, [nombre, duracion, lanzamiento_id, siguiente_pista, url_audio])
-
-        # Volver al paso 2
-        request.session['lanzamiento_en_curso'] = lanzamiento_id
-        return redirect('lanzamiento_crear')
-
+    request.session['lanzamiento_en_curso'] = lanzamiento_id
     return redirect('lanzamiento_crear')
 
 def cancion_eliminar(request, cancion_id):
@@ -882,7 +776,7 @@ def playlist_crear(request):
     if request.method == 'POST':
         nombre = request.POST.get('nombre', '').strip()
         if nombre:
-            playlists_col = db["Playlists"]
+            playlists_col = db["Playlist"]
             resultado = playlists_col.insert_one({
                 "NombrePlaylist": nombre,
                 "IDUsuario": ObjectId(id_persona),
@@ -898,7 +792,7 @@ def playlist_detail(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    playlists_col = db["Playlists"]
+    playlists_col = db["Playlist"]
     canciones_col = db["Canciones"]
 
     try:
@@ -965,7 +859,7 @@ def playlist_editar(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    playlists_col = db["Playlists"]
+    playlists_col = db["Playlist"]
 
     try:
         playlist_doc = playlists_col.find_one({
@@ -994,7 +888,7 @@ def playlist_eliminar(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    playlists_col = db["Playlists"]
+    playlists_col = db["Playlist"]
 
     try:
         playlist_doc = playlists_col.find_one({
@@ -1019,7 +913,7 @@ def playlist_agregar_cancion(request, playlist_id):
     if not id_persona:
         return redirect('Login')
 
-    playlists_col = db["Playlists"]
+    playlists_col = db["Playlist"]
 
     try:
         playlist_doc = playlists_col.find_one({
@@ -1055,7 +949,7 @@ def playlist_quitar_cancion(request, playlist_id, cancion_id):
     if not id_persona:
         return redirect('Login')
 
-    playlists_col = db["Playlists"]
+    playlists_col = db["Playlist"]
 
     try:
         playlist_doc = playlists_col.find_one({

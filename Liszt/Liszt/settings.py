@@ -83,7 +83,7 @@ DATABASES = {
     }
 }
 MONGODB_SETTINGS = {
-    "URI": "mongodb+srv://Admin:admin@clusterudla03.iotnrqc.mongodb.net/",
+    "URI": "mongodb+srv://Admin:UDLA@clusterudla03.fer4ny7.mongodb.net/",
     "DB_NAME": "Liszt"
 }
 

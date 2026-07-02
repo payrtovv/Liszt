@@ -53,7 +53,7 @@
         <select id="genero" name="genero" required>
           <option value="">-- Seleccionar --</option>
           {% for g in generos %}
-            <option value="{{ g.id }}">{{ g.nombre }}</option>
+            <option value="{{ g }}">{{ g }}</option>
           {% endfor %}
         </select>
       </div>

@@ -1,10 +1,8 @@
 {% extends 'music/base_music.html' %}
 {% load static %}
-
 {% block title %}Buscar canciones - Liszt{% endblock %}
 {% block nav_buscar %}active{% endblock %}
 {% block page_title %}Buscar canciones{% endblock %}
-
 {% block content %}
 <form method="get" id="form-busqueda" class="search-bar">
   <input id="input-busqueda" type="text" name="q" value="{{ q }}" placeholder="Buscar...">
@@ -16,7 +14,6 @@
   </select>
   <button class="btn btn-primary" type="submit">Buscar</button>
 </form>
-
 {% if q %}
   {% if canciones %}
     <p style="color:#aaa; margin-bottom:1rem">
@@ -34,10 +31,17 @@
       </thead>
       <tbody>
         {% for c in canciones %}
-        <tr>
+        <tr style="cursor:pointer;"
+            onclick="reproducirCancion('{{ c.idCancion }}', '{{ c.nombre|escapejs }}', '{{ c.artista|escapejs }}')">
           <td><strong style="color:#fff">{{ c.nombre }}</strong></td>
           <td>{{ c.artista }}</td>
-          <td><a href="{% url 'lanzamiento_detail' lanzamiento_id=c.idLanzamiento %}" style="color:#3387c7">{{ c.album }}</a></td>
+          <td onclick="event.stopPropagation()">
+            {% if c.idLanzamiento %}
+              <a href="{% url 'lanzamiento_detail' lanzamiento_id=c.idLanzamiento %}" style="color:#3387c7">{{ c.album }}</a>
+            {% else %}
+              {{ c.album }}
+            {% endif %}
+          </td>
           <td>{{ c.duracion }}</td>
           <td>{{ c.reproducciones }}</td>
         </tr>
@@ -51,11 +55,10 @@
   <div class="empty">Ingresa un término de búsqueda para encontrar canciones.</div>
 {% endif %}
 {% endblock %}
-
 {% block scripts %}
 <script src="{% static 'JS/music.js' %}"></script>
 <script>
-  initAutoSearch('input-busqueda', 'select-filtro', 'form-busqueda', 600);
-  initSortableTable('tabla-canciones');
+initAutoSearch('input-busqueda', 'select-filtro', 'form-busqueda', 600);
+initSortableTable('tabla-canciones');
 </script>
 {% endblock %}
